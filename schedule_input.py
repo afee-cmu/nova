@@ -376,18 +376,26 @@ def load_workbook_input(path):
 # ---------------------------------------------------------------------------
 # Adapt to scheduler.py's inputs
 # ---------------------------------------------------------------------------
+def _role(task):
+    """Scheduler roles are lowercase (matching pipeline.py's convention). The workbook
+    keeps human-friendly task names (e.g. 'Fry Station'); the solver sees 'fry station'."""
+    return task.strip().lower()
+
+
 def to_scheduler_inputs(data):
     """Convert normalized `data` into (employees, config) for scheduler.run_pipeline.
 
-    - config.default_role_rates : {task: default wage}  (tasks that have a wage)
-    - config.rush_profile       : {day: [{name, window, staff:{task: n}}]}  (per-day)
-    - employees[*].roles        : {task: per-person wage or None}  (from Proficiency)
+    - config.default_role_rates : {role: default wage}  (tasks that have a wage)
+    - config.rush_profile       : {day: [{name, window, staff:{role: n}}]}  (per-day)
+    - employees[*].roles        : {role: per-person wage or None}  (from Proficiency)
     - employees[*].available    : ["<Day>_<window_label>"] covered by availability blocks
     - employees[*].max_hours    : max_hours_week   (hard cap; no overtime)
     - employees[*].max_shifts   : max_shifts_week  (omitted if blank)
+
+    Task names are lowercased to roles (see _role) so this path and pipeline.py agree.
     """
     config = {
-        "default_role_rates": {name: t["default_hourly_rate"]
+        "default_role_rates": {_role(name): t["default_hourly_rate"]
                                for name, t in data["tasks"].items()
                                if t["default_hourly_rate"] is not None},
         "rush_profile": _build_rush_profile(data["demand"]),
@@ -415,7 +423,7 @@ def to_scheduler_inputs(data):
             "id": e["employee_id"],
             "name": e["name"],
             # eligibility + wage per task; None wage -> scheduler uses the task default
-            "roles": {task: sk["hourly_rate"] for task, sk in e["task_skills"].items()},
+            "roles": {_role(task): sk["hourly_rate"] for task, sk in e["task_skills"].items()},
             "max_hours": e["max_hours_week"] if e["max_hours_week"] is not None else 0,
             "available": available,
         }
@@ -441,7 +449,8 @@ def _build_rush_profile(demand):
                   "window": f"{_hhmm(d['start_min'])}-{_hhmm(d['end_min'])}",
                   "staff": {}})
         if d["required_staff"]:
-            entry["staff"][d["task"]] = entry["staff"].get(d["task"], 0) + d["required_staff"]
+            role = _role(d["task"])
+            entry["staff"][role] = entry["staff"].get(role, 0) + d["required_staff"]
 
     profile = {}
     for (day, _label), entry in by_day_label.items():
