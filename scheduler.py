@@ -19,6 +19,7 @@ EmployeeProfile  (one per employee; becomes a row in an `employees` table)
     "grill": 19.0,              #   number = this employee's rate for this role
     "prep": null                #   null   = use the restaurant's default rate for the role
   },
+  "min_hours": 12,              # optional weekly minimum (soft: warned about if impossible)
   "max_hours": 30,              # weekly hour cap
   "max_shifts": 5,              # optional weekly shift cap
   "available": ["Fri_dinner", "Sat_lunch"]   # shift names are "<Day>_<window name>"
@@ -32,11 +33,20 @@ RestaurantConfig  (one per restaurant/location)
                  {"name": "dinner", "window": "17:00-21:00", "staff": {"grill": 2, "cashier": 1, "expo": 1}} ],
     "weekend": [ ... ],
     "Fri":     [ ... ]          # optional: a specific day overrides its weekday/weekend group
-  }
+  },
+  "everyone_gets_a_shift": true # optional (default true): try to give every available employee >= 1 shift
 }
 
 Wages: an employee's own rate for a role wins; otherwise the restaurant default for
 that role applies. So pay can differ by role AND by employee.
+
+Priorities, highest first (the solver trades off in this order):
+  1. fill every slot the rush profile asks for
+  2. give every employee with availability at least one shift
+  3. meet each employee's min_hours
+  4. minimize labor cost
+Nobody is ever added beyond what a window needs just to give them hours; instead,
+people below their minimum take slots that would otherwise go to someone else.
 """
 
 from collections import defaultdict
@@ -49,6 +59,14 @@ DAY_GROUPS = {"weekday": ["Mon", "Tue", "Wed", "Thu", "Fri"], "weekend": ["Sat",
 # Cost of leaving one slot unfilled, in cents ($10,000). Always worse than paying
 # anyone, so the solver fills every slot it legally can before leaving a gap.
 SHORTAGE_PENALTY_CENTS = 1_000_000
+
+# Penalty for an employee with availability getting zero shifts ($3,000): below an
+# unfilled slot, above any amount of min-hours shortfall or wage difference.
+UNSCHEDULED_PENALTY_CENTS = 300_000
+
+# Penalty per minute an employee falls below their min_hours ($60/hour short): more
+# than any wage difference between two people, so min-hours beats saving money.
+MIN_HOURS_PENALTY_CENTS_PER_MIN = 100
 
 
 # ---------------------------------------------------------------------------
@@ -131,10 +149,13 @@ def validate_input(employees, config, shifts, demand):
         for s in e.get("available", []):
             if s not in shifts:
                 errors.append(f"{label}: unknown shift '{s}'")
-        for field in ("max_hours", "max_shifts"):
+        for field in ("min_hours", "max_hours", "max_shifts"):
             if field in e and e[field] is not None:
                 if not isinstance(e[field], (int, float)) or e[field] < 0:
                     errors.append(f"{label}: '{field}' must be a non-negative number")
+        mn, mx = e.get("min_hours"), e.get("max_hours")
+        if isinstance(mn, (int, float)) and isinstance(mx, (int, float)) and mn > mx:
+            errors.append(f"{label}: min_hours ({mn}) is more than max_hours ({mx})")
     return errors
 
 
@@ -144,12 +165,14 @@ def validate_input(employees, config, shifts, demand):
 def build_schedule(employees, config, shifts, demand, time_limit_s=10):
     rates = config["default_role_rates"]
     emp = {e["id"]: e for e in employees}
-    roles_needed = {d["role"] for d in demand}
+    roles_needed = defaultdict(set)  # shift -> roles that shift actually needs
+    for d in demand:
+        roles_needed[d["shift"]].add(d["role"])
 
     m = cp_model.CpModel()
 
     # x[(employee_id, shift, role)] = 1 if that employee works that shift in that role.
-    # Only created where the employee is available AND can do the role.
+    # Only created where the employee is available, can do the role, AND the shift needs it.
     x, cost_cents = {}, {}
     for eid, e in emp.items():
         available = set(e["available"])
@@ -157,7 +180,7 @@ def build_schedule(employees, config, shifts, demand, time_limit_s=10):
             if s not in available:
                 continue
             for r in e["roles"]:
-                if r in roles_needed:
+                if r in roles_needed[s]:
                     x[eid, s, r] = m.NewBoolVar(f"{eid}|{s}|{r}")
                     cost_cents[eid, s, r] = round(resolve_wage(e, r, rates) * info["minutes"] / 60 * 100)
 
@@ -180,17 +203,34 @@ def build_schedule(employees, config, shifts, demand, time_limit_s=10):
         if e.get("max_shifts") is not None:
             m.Add(sum(v for _, v in items) <= int(e["max_shifts"]))
 
-    # Cover demand; `short` records gaps instead of making the model unsolvable
+    # Cover demand; `short` records gaps instead of making the model unsolvable.
+    # Never staff a role above what the window needs.
     short = {}
     for d in demand:
         key = (d["shift"], d["role"])
+        staffed = sum(by_shift_role.get(key, []))
         short[key] = m.NewIntVar(0, d["needed"], f"short|{d['shift']}|{d['role']}")
-        m.Add(sum(by_shift_role.get(key, [])) + short[key] >= d["needed"])
+        m.Add(staffed + short[key] >= d["needed"])
+        m.Add(staffed <= d["needed"])
 
-    # Minimize labor cost (in cents) + a huge penalty per unfilled slot
+    # Soft minimums: minutes below min_hours, and whether each person works at all
+    under_min, works_any = {}, {}
+    for eid, e in emp.items():
+        items = by_emp.get(eid, [])
+        min_minutes = int((e.get("min_hours") or 0) * 60)
+        if min_minutes > 0:
+            under_min[eid] = m.NewIntVar(0, min_minutes, f"under|{eid}")
+            m.Add(sum(shifts[s]["minutes"] * v for s, v in items) + under_min[eid] >= min_minutes)
+        if config.get("everyone_gets_a_shift", True) and items:
+            works_any[eid] = m.NewBoolVar(f"works|{eid}")
+            m.Add(sum(v for _, v in items) >= works_any[eid])
+
+    # Objective, in priority order via penalty sizes (all in cents)
     m.Minimize(
-        sum(cost_cents[k] * v for k, v in x.items())
-        + SHORTAGE_PENALTY_CENTS * sum(short.values())
+        SHORTAGE_PENALTY_CENTS * sum(short.values())
+        + UNSCHEDULED_PENALTY_CENTS * (len(works_any) - sum(works_any.values()))
+        + MIN_HOURS_PENALTY_CENTS_PER_MIN * sum(under_min.values())
+        + sum(cost_cents[k] * v for k, v in x.items())
     )
 
     solver = cp_model.CpSolver()
@@ -225,13 +265,46 @@ def build_schedule(employees, config, shifts, demand, time_limit_s=10):
     ]
     gaps.sort(key=lambda g: (DAY_ORDER.index(g["day"]), shifts[g["shift"]]["start"], g["role"]))
 
+    summary = employee_summary(assignments, employees)
     return {
         "status": "optimal" if status == cp_model.OPTIMAL else "feasible",
         "assignments": assignments,
         "gaps": gaps,
         "labor_cost": round(sum(a["cost"] for a in assignments), 2),
-        "employees": employee_summary(assignments, employees),
+        "employees": summary,
+        "warnings": staffing_warnings(summary, employees, shifts, demand),
     }
+
+
+def staffing_warnings(summary, employees, shifts, demand):
+    """Explain anyone left unscheduled or below their minimum, with the reason."""
+    needed = defaultdict(set)  # shift -> roles that shift needs
+    for d in demand:
+        needed[d["shift"]].add(d["role"])
+    by_id = {e["id"]: e for e in employees}
+
+    warnings = []
+    for row in summary:
+        e = by_id[row["employee_id"]]
+        eligible = [s for s in e["available"] if needed[s] & set(e["roles"])]
+        eligible_hours = sum(shifts[s]["minutes"] for s in eligible) / 60
+        min_h = e.get("min_hours") or 0
+
+        if row["shifts"] == 0:
+            if not eligible:
+                why = "none of their available shifts need their role(s)" if e["available"] else "they listed no availability"
+            else:
+                why = "every slot they could take was needed by someone filling a gap or meeting a minimum"
+            warnings.append({"employee_id": e["id"], "name": e["name"], "type": "unscheduled",
+                             "message": f"{e['name']} has no shifts this week: {why}."})
+        elif row["hours"] < min_h:
+            if eligible_hours < min_h:
+                why = f"they're only available for {eligible_hours:g} hrs of shifts that need their role(s)"
+            else:
+                why = "the other shifts they could work are taken by people with higher priority"
+            warnings.append({"employee_id": e["id"], "name": e["name"], "type": "below_min_hours",
+                             "message": f"{e['name']} is scheduled {row['hours']:g} hrs, below their {min_h:g}-hr minimum: {why}."})
+    return warnings
 
 
 def employee_summary(assignments, employees):
@@ -245,6 +318,7 @@ def employee_summary(assignments, employees):
             "name": e["name"],
             "shifts": len(mine),
             "hours": round(sum(a["hours"] for a in mine), 2),
+            "min_hours": e.get("min_hours"),
             "max_hours": e["max_hours"],
             "max_shifts": e.get("max_shifts"),
             "pay": round(sum(a["cost"] for a in mine), 2),
@@ -290,6 +364,8 @@ def export_schedule_xlsx(result, path="schedule.xlsx", summary=None):
         employees_df.to_excel(writer, sheet_name="Employees", index=False)
         gaps_df.to_excel(writer, sheet_name="Gaps", index=False)
         cost_df.to_excel(writer, sheet_name="Cost", index=False)
+        if result.get("warnings"):
+            pd.DataFrame(result["warnings"]).to_excel(writer, sheet_name="Warnings", index=False)
         if summary:
             pd.DataFrame({"Summary": summary.split("\n")}).to_excel(writer, sheet_name="Summary", index=False)
 
@@ -362,6 +438,10 @@ if __name__ == "__main__":
          "available": ["Mon_dinner", "Tue_dinner", "Wed_dinner", "Thu_lunch", "Sat_lunch", "Sun_lunch", "Sat_dinner"]},
         {"id": "emp_006", "name": "Chris",  "roles": {"expo": None, "cashier": None}, "max_hours": 24,
          "available": ["Thu_dinner", "Fri_lunch", "Fri_dinner", "Sat_dinner", "Sun_lunch", "Sun_dinner"]},
+        {"id": "emp_007", "name": "Dana",   "roles": {"cashier": None}, "min_hours": 12, "max_hours": 20,
+         "available": ["Mon_lunch", "Tue_lunch", "Wed_lunch", "Thu_lunch", "Fri_lunch"]},
+        {"id": "emp_008", "name": "Morgan", "roles": {"expo": None}, "min_hours": 10, "max_hours": 20,
+         "available": ["Mon_lunch", "Tue_lunch"]},   # weekday lunches need no expo -> can't be scheduled
     ]
 
     result = run_pipeline(employees, config, xlsx_path="schedule.xlsx")
@@ -374,10 +454,14 @@ if __name__ == "__main__":
         print(f"Status: {result['status']}   Total labor cost: ${result['labor_cost']:.2f}\n")
         print("Per-employee:")
         for e in result["employees"]:
-            print(f"  {e['name']:<7} {e['shifts']} shifts, {e['hours']:>4}/{e['max_hours']} hrs, "
+            print(f"  {e['name']:<7} {e['shifts']} shifts, {e['hours']:>4} hrs (min {e['min_hours'] or 0}, max {e['max_hours']}), "
                   f"${e['pay']:.2f} | roles: {', '.join(e['roles_worked']) or '-'} | "
                   f"available but unassigned: {', '.join(e['available_but_unassigned']) or '-'}")
         print("\nGaps:" if result["gaps"] else "\nNo gaps.")
         for g in result["gaps"]:
             print(f"  {g['shift']}: short {g['missing']} {g['role']}")
+        if result["warnings"]:
+            print("\nStaffing warnings:")
+            for w in result["warnings"]:
+                print("  " + w["message"])
         print(f"\nSaved {result.get('xlsx_path')}")

@@ -22,7 +22,7 @@ import requests
 
 from scheduler import DAY_ORDER, build_shifts, export_schedule_xlsx, run_pipeline, validate_input
 
-MODEL = "openai/gpt-4o-mini"   # swap for a stronger model if extraction gets things wrong
+MODEL = "openai/gpt-4o"   # stronger than gpt-4o-mini at following the extraction rules
 API_KEY = os.getenv("api_key")
 URL = "https://openrouter.ai/api/v1/chat/completions"
 MAX_FIX_ATTEMPTS = 2
@@ -54,6 +54,7 @@ Output ONLY a JSON object, no prose, in exactly this shape:
       "id": "emp_001",
       "name": "<name>",
       "roles": {"<role>": <hourly wage number or null>},
+      "min_hours": <number or null>,
       "max_hours": <number>,
       "max_shifts": <number or null>,
       "available": ["<shift name>"]
@@ -69,15 +70,17 @@ Rules:
 {SHIFTS}
 - Interpret availability against those shifts: "lunches"/"mornings"/"days" -> lunch shifts; "nights"/"evenings" -> dinner shifts; "all day" -> every shift that day; "weekends" -> Sat and Sun; "weekdays" -> Mon-Fri; "open"/"anytime" -> every shift. Apply exclusions ("except Sundays", "not Saturday lunch").
 - If no hour cap is given, use 40. If no shift cap is given, use null.
+- If the notes give a minimum ("needs at least 15 hrs", "wants 20+ hours", "guaranteed 12"), set min_hours to it; otherwise null.
 - Ids are emp_001, emp_002, ... in roster order.
 - Record every interpretation in "assumptions" (e.g. "Read 'nights' as dinner shifts for Alex").
 """
 
-SUMMARY_PROMPT = """You explain a weekly staff schedule to a busy restaurant manager.
-From the JSON you are given, write a short summary (under 200 words) in plain text: no markdown, no asterisks, no tables.
-- State the total labor cost and who carries the most hours.
-- For every coverage gap, give the suggestion from that gap's "candidates" list. Use ONLY the people and reasons listed there. Never suggest anyone who isn't listed for that gap. If a gap has no candidates, say nobody on staff has that role and suggest hiring, cross-training, or lowering that window's staffing.
-Be specific and brief."""
+SUMMARY_PROMPT = """You write the opening of a weekly staff schedule report for a busy restaurant manager.
+Write 2-3 sentences of plain text (no markdown, no asterisks, no lists) using ONLY the facts in the JSON:
+- the total labor cost and who carries the most hours
+- how many coverage gaps there are and which role is short most often
+Do NOT describe individual gaps or suggest specific people; a detailed gap list follows your text.
+Never state anything that is not in the JSON."""
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +91,7 @@ def call_llm(system, user, history=None):
     r = requests.post(
         URL,
         headers={"Authorization": f"Bearer {API_KEY}"},
-        json={"model": MODEL, "messages": messages},
+        json={"model": MODEL, "messages": messages, "temperature": 0},  # 0 = consistent output
         timeout=120,
     )
     data = r.json()
@@ -180,7 +183,7 @@ def gap_candidates(result, employees, shifts, limit=3):
             if shift in working[e["id"]]:
                 reason, rank = f"already working this shift as {working[e['id']][shift]}", 3
             elif new_hours > e["max_hours"]:
-                reason = f"would go over their hour cap ({used['hours']:g} + {shift_hours:g} > {e['max_hours']:g})"
+                reason = f"would go over their hour cap, {used['hours']:g} + {shift_hours:g} > {e['max_hours']:g}"
                 rank = 2
             elif e.get("max_shifts") is not None and used["shifts"] + 1 > e["max_shifts"]:
                 reason, rank = f"would go over their {e['max_shifts']}-shift cap", 2
@@ -194,10 +197,41 @@ def gap_candidates(result, employees, shifts, limit=3):
     return out
 
 
+def print_extraction(employees):
+    """Readable view of what the LLM extracted, so the manager can confirm it."""
+    for e in employees:
+        roles = ", ".join(f"{r} ${w:g}" if w is not None else f"{r} (default pay)" for r, w in e["roles"].items())
+        caps = (f"min {e['min_hours']:g} hrs, " if e.get("min_hours") else "") + f"max {e['max_hours']:g} hrs" \
+            + (f", {e['max_shifts']} shifts" if e.get("max_shifts") else "")
+        by_day = defaultdict(list)
+        for s in e["available"]:
+            day, window = s.split("_", 1)
+            by_day[day].append(window)
+        avail = " | ".join(f"{d} {'+'.join(by_day[d])}" for d in DAY_ORDER if d in by_day) or "none"
+        print(f"    {e['name']}: {roles}; {caps}")
+        print(f"        available: {avail}")
+
+
+def format_gaps(gaps_with_candidates):
+    """Plain-English gap list written by code, so every name and reason is exact."""
+    if not gaps_with_candidates:
+        return "Coverage gaps: none. Every slot is filled."
+    lines = ["Coverage gaps:"]
+    for g in gaps_with_candidates:
+        head = f"- {g['day']} {g['window']}: short {g['missing']} {g['role']}."
+        if g["candidates"]:
+            opts = "; ".join(f"{c['name']} ({c['reason']})" for c in g["candidates"])
+            lines.append(f"{head} Options: {opts}.")
+        else:
+            lines.append(f"{head} Nobody on staff works {g['role']}: consider hiring, "
+                         f"cross-training, or lowering this window's {g['role']} staffing.")
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-def main(setup_path, availability_path, xlsx_path="schedule.xlsx"):
+def main(setup_path, availability_path, xlsx_path="schedule.xlsx", confirm=True):
     if not API_KEY:
         sys.exit("No api_key found. Run with --env-file .env")
 
@@ -221,18 +255,40 @@ def main(setup_path, availability_path, xlsx_path="schedule.xlsx"):
     with open("extracted_input.json", "w") as f:
         json.dump({"config": config, "employees": employees, "assumptions": assumptions}, f, indent=2)
 
+    print("\n    Here's what I understood:")
+    print_extraction(employees)
+    if confirm:
+        input("\n    Fix anything wrong in extracted_input.json, save it, then press Enter to build the schedule...")
+        with open("extracted_input.json") as f:
+            edited = json.load(f)
+        config, employees = edited["config"], edited["employees"]
+        assumptions = edited.get("assumptions", assumptions)
+        errors = check_setup(config)
+        shifts, demand = build_shifts(config["rush_profile"]) if not errors else ({}, [])
+        errors = errors or validate_input(employees, config, shifts, demand)
+        if errors:
+            sys.exit("extracted_input.json has problems:\n- " + "\n- ".join(errors))
+
     print("3/4 Solving schedule...")
     result = run_pipeline(employees, config)
     if result["status"] not in ("optimal", "feasible"):
         sys.exit(f"Could not build a schedule: {result}")
 
     print("4/4 Writing summary...")
+    gaps = gap_candidates(result, employees, shifts)
+    short_by_role = defaultdict(int)
+    for g in gaps:
+        short_by_role[g["role"]] += g["missing"]
     summary_input = {
-        "labor_cost": result["labor_cost"],
-        "hours_by_employee": {e["name"]: e["hours"] for e in result["employees"]},
-        "gaps": gap_candidates(result, employees, shifts),
+        "labor_cost": f"${result['labor_cost']:,.2f}",
+        "hours_by_employee": {e["name"]: f"{e['hours']:g}" for e in result["employees"]},
+        "total_unfilled_slots": sum(short_by_role.values()),
+        "unfilled_slots_by_role": dict(short_by_role),
     }
-    summary = call_llm(SUMMARY_PROMPT, json.dumps(summary_input)).replace("**", "")
+    overview = call_llm(SUMMARY_PROMPT, json.dumps(summary_input)).replace("**", "").strip()
+    summary = overview + "\n\n" + format_gaps(gaps)
+    if result.get("warnings"):
+        summary += "\n\nStaffing warnings:\n" + "\n".join(f"- {w['message']}" for w in result["warnings"])
     if assumptions:
         summary += "\n\nHow your notes were interpreted:\n" + "\n".join(f"- {a}" for a in assumptions)
     export_schedule_xlsx(result, xlsx_path, summary=summary)
@@ -242,6 +298,7 @@ def main(setup_path, availability_path, xlsx_path="schedule.xlsx"):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        sys.exit("Usage: python pipeline.py <restaurant_setup.txt> <availability.txt>")
-    main(sys.argv[1], sys.argv[2])
+    args = [a for a in sys.argv[1:] if a != "--yes"]
+    if len(args) != 2:
+        sys.exit("Usage: python pipeline.py <restaurant_setup.txt> <availability.txt> [--yes]")
+    main(args[0], args[1], confirm="--yes" not in sys.argv)
