@@ -1,0 +1,158 @@
+================================================================================
+NOVA SCHEDULING — WHAT TO PUT IN THE SHEET
+A guide for managers filling out the input workbook
+================================================================================
+
+WHAT THIS IS
+------------
+You give the system your people, your tasks, how good each person is at each task,
+when they can work, and when you're busy. The system builds a weekly schedule that
+puts your most efficient people where they matter most — especially during rushes —
+so service is fast and wait times drop. It never schedules overtime on its own and it
+flags anything that touches workers' rights for you to decide.
+
+Two ways to give us your data:
+
+  1. THE WORKBOOK (recommended).  Fill in schedule_input_template.xlsx (the tabs below).
+     It is read directly and exactly as you typed it. Nothing is sent to any outside
+     service, so employee names and pay stay in-house. This is the privacy-safe path.
+
+  2. PLAIN-TEXT NOTES (optional).  If you'd rather paste messy notes ("Alex does nights,
+     Sam is fast on the fryer…"), an AI assistant reads them and turns them into the same
+     structured data, which you then review and correct before anything is scheduled.
+     NOTE: this path sends your notes (including names and pay) to a third-party AI
+     provider to interpret them. Use the workbook if that data must not leave your systems.
+
+This guide describes the WORKBOOK. Only yellow cells are yours to edit; each tab has one
+grey example row showing the format — type over it or delete it.
+
+
+THE EFFICIENCY METRIC (the heart of it)
+---------------------------------------
+For every person, for every task they can do, you give an EFFICIENCY RATING.
+
+  • HIGHER = MORE EFFICIENT.  A 5 is faster/better at that task than a 3.
+  • It is per TASK, not per person.  Someone can be a 5 on the fryer and a 2 on the grill.
+  • Where does the number come from?  Whatever you measure. The clearest basis is TIME:
+    how long, on average, it takes that person to do that task (e.g. seconds per order,
+    tickets per hour). Faster → higher rating. You convert your measurement into the
+    rating; a simple way is:
+        5 = fastest / your best at this task
+        4 = above average
+        3 = solid, meets expectations
+        2 = slow, still learning
+        1 = much slower than others
+  • Only rate tasks a person actually does. A rating is also what makes them ELIGIBLE for
+    that task — no rating means the optimizer won't assign them to it.
+
+The optimizer adds these ratings up across the schedule and favors the arrangement with
+the highest total — and it counts busy windows more (see RushWindows > priority), so your
+strongest people land in the rushes.
+
+
+FRONT OF HOUSE vs BACK OF HOUSE
+-------------------------------
+People stay on their side of the house. A front-of-house person (server, cashier, host)
+is never put on a back-of-house task (cook, grill, fryer, dishwasher), and vice versa.
+This is automatic and based on each task's role (set on the Tasks tab):
+
+  BACK of house : Cook, Dishwasher   (and prep/line)
+  FRONT of house: Server, Cashier, Host   (and bar/runner)
+  EITHER        : Manager
+
+So just rate people on the tasks they really do, and the boundary takes care of itself.
+
+
+THE TABS — WHAT TO FILL IN
+================================================================================
+
+ROLES  (reference list; extend if needed)
+  The broad job categories (Cook, Server, Cashier, Host, Dishwasher, Manager). These set
+  the front/back-of-house side for every task. You rarely need to change this.
+  Columns: role | description
+
+TASKS  (the stations the schedule staffs — the pay/skill unit)
+  Each specific station a person can be assigned to, e.g. Fry Station, Grill, Expo,
+  Register, Floor, Host Stand, Dish Pit.
+  Columns:
+    task                 — the station name (e.g. "Fry Station")
+    role                 — which broad Role it belongs to (sets front/back of house)
+    description          — free text
+    default_hourly_rate  — the usual wage for this station (used only to respect pay/OT
+                           rules; pay is NOT what the efficiency schedule optimizes for)
+    target_units_per_hour— optional, informational
+
+EMPLOYEES  (one row per person)
+  Columns:
+    employee_id          — a stable id you invent (E001, E002, …); must match other tabs
+    name                 — display name
+    primary_role         — their main Role (also sets their front/back-of-house side)
+    secondary_roles      — other Roles they can cover, comma-separated (optional)
+    employment_type      — Full-time / Part-time (optional)
+    min_hours_week       — the minimum weekly hours you want to give them (optional; if the
+                           schedule can't reach it, you get a FLAG — it's never forced)
+    max_hours_week       — hard weekly cap. The schedule NEVER exceeds this; unmet demand
+                           becomes a gap for you rather than silent overtime. (required)
+    max_shifts_week      — optional hard cap on number of shifts
+    overtime_threshold_hours — reference only (e.g. 40). Recorded so you can see who's near
+                           overtime. It does NOT authorize the system to schedule overtime.
+
+AVAILABILITY  (one row per time block a person can work)
+  Columns:
+    employee_id          — must match an Employees row
+    day                  — Mon Tue Wed Thu Fri Sat Sun
+    available_start      — 24-hour HH:MM (e.g. 09:00)
+    available_end        — 24-hour HH:MM (e.g. 17:00)
+    preference           — Preferred / Available / Avoid (optional)
+  A person can work a rush window only if one of their blocks fully covers it.
+
+PROFICIENCY  (THIS IS WHERE THE EFFICIENCY RATINGS GO)
+  One row per person per task they can do.
+  Columns:
+    employee_id          — must match an Employees row
+    task                 — must match a Tasks row (and be on their side of the house)
+    proficiency          — THE EFFICIENCY RATING, 1–5, higher = more efficient (see above)
+    hourly_rate          — that person's wage for this task (optional; blank = task default)
+    throughput_per_hour  — optional raw metric (e.g. units/hour); informational for now
+  A person with no Proficiency row for a task is simply never assigned that task.
+
+RUSHWINDOWS  (your demand — and when you're busy)
+  One row per (window, task): how many of a task you need in a given window.
+  Columns:
+    day                  — Mon Tue Wed Thu Fri Sat Sun
+    window_label         — a name for the window (e.g. "Lunch", "Dinner Rush")
+    window_start         — 24-hour HH:MM
+    window_end           — 24-hour HH:MM
+    task                 — which station this demand is for (must be on the Tasks tab)
+    required_staff       — how many people you need at that task in that window
+    priority             — HOW BUSY this window is: 1 = normal, 2 = busy, 3 = slammed.
+                           Higher priority tells the optimizer to put your most efficient
+                           people here first, to keep wait times down. Blank = 1.
+
+POLICY  (your operating decisions)
+  Key/value settings. The important one:
+    overtime_allowed     — Yes/No. Your call. The system never schedules past anyone's
+                           max_hours; if a rush can't be covered within normal hours you
+                           get a gap to decide on. Overtime is never automatic.
+
+
+FORMATS & RULES (quick reference)
+---------------------------------
+  • Times: 24-hour HH:MM (09:00, 17:30).
+  • Days: the three-letter codes Mon Tue Wed Thu Fri Sat Sun.
+  • employee_id must be identical everywhere it appears.
+  • Every task you use must exist on the Tasks tab; every role on the Roles tab.
+  • Rate a task only for people who actually do it (rating = eligibility).
+
+
+WHAT YOU GET BACK
+-----------------
+A weekly schedule that:
+  • covers every window it can, placing your most efficient people — weighted toward your
+    busiest windows — to cut wait times;
+  • keeps everyone on their side of the house;
+  • never exceeds anyone's hour/shift caps (no silent overtime);
+  • FLAGS, for your decision: any window that could only be covered with overtime, and
+    anyone left under their minimum hours.
+The system makes no recommendations about layoffs or pay — it only schedules the people
+and ratings you give it.

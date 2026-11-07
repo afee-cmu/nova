@@ -351,9 +351,16 @@ def load_workbook_input(path):
             req = None
         if req is not None and req < 0:
             issues.error(f"{where}: required_staff cannot be negative")
+        # Optional busy-time weight: higher priority => the efficiency optimizer works
+        # harder to place its most efficient people in this window (to cut wait times).
+        # Optional column; defaults to 1 (normal) when blank or absent.
+        priority = _num(row, "priority", where, issues, default=1)
+        if priority is not None and priority < 1:
+            issues.error(f"{where}: priority must be 1 or greater (1 = normal)")
         demand.append({"day": day, "window_label": label, "start_min": start,
                        "end_min": end, "task": task,
-                       "role": tasks.get(task, {}).get("role", ""), "required_staff": req})
+                       "role": tasks.get(task, {}).get("role", ""), "required_staff": req,
+                       "priority": priority if priority is not None else 1})
 
     if not demand:
         issues.warn("No rush windows defined — the optimizer will have no demand to staff.")
@@ -496,6 +503,66 @@ def _build_rush_profile(demand):
     for (day, _label), entry in by_day_label.items():
         profile.setdefault(day, []).append(entry)
     return profile
+
+
+# ---------------------------------------------------------------------------
+# Efficiency inputs (for efficiency_scheduler, not the cost scheduler)
+# ---------------------------------------------------------------------------
+# Which broad role sits front-of-house vs back-of-house. The efficiency optimizer
+# keeps people in their domain (a server is never put on the grill), so this is the
+# hard FOH/BOH boundary. "any" (e.g. Manager) may work either side.
+DOMAIN_BY_ROLE = {
+    "cook": "back", "dishwasher": "back", "prep": "back", "line": "back",
+    "server": "front", "cashier": "front", "host": "front", "bar": "front", "runner": "front",
+    "manager": "any",
+}
+
+
+def _domain(role_name):
+    return DOMAIN_BY_ROLE.get(str(role_name).strip().lower(), "any")
+
+
+def efficiency_inputs(data):
+    """Build inputs for efficiency_scheduler.solve_efficient_schedule from workbook data.
+
+    Returns (employees, config, extras) where extras holds:
+      - efficiency   : {(employee_id, role): rating}   higher = more efficient
+      - role_domain  : {role: "front"|"back"|"any"}    (role = lowercased task)
+      - window_weight: {shift_name: weight}            busy windows weigh more
+
+    Efficiency rating per (person, task) comes from the Proficiency tab (the 1-5 score;
+    a future UI may derive it from a time metric and map it onto the same higher=better
+    scale). FOH/BOH domain comes from each task's broad role. Busy-window weight comes
+    from the RushWindows 'priority' column (default 1). Pay is NOT part of this path.
+    """
+    employees, config = to_scheduler_inputs(data)
+
+    # tag each employee with their domain (from their primary/first role)
+    by_id = {e["employee_id"]: e for e in data["employees"]}
+    for emp in employees:
+        src = by_id.get(emp["id"], {})
+        role = src.get("primary_role") or (src.get("roles") or [None])[0]
+        emp["domain"] = _domain(role) if role else "any"
+
+    # role (= lowercased task) -> domain, from each task's broad role
+    role_domain = {_role(name): _domain(t["role"]) for name, t in data["tasks"].items()}
+
+    # efficiency rating per (employee, role); role is the lowercased task name
+    efficiency = {}
+    for src in data["employees"]:
+        for task, sk in src["task_skills"].items():
+            if sk.get("proficiency") is not None:
+                efficiency[(src["employee_id"], _role(task))] = float(sk["proficiency"])
+
+    # busy-window weight: max priority among a window's demand rows (default 1)
+    window_weight = {}
+    for d in data["demand"]:
+        if d["task"] and d["start_min"] is not None and d["end_min"] is not None:
+            shift = f"{d['day']}_{d['window_label']}"
+            window_weight[shift] = max(window_weight.get(shift, 1), int(d.get("priority") or 1))
+
+    extras = {"efficiency": efficiency, "role_domain": role_domain, "window_weight": window_weight}
+    return employees, config, extras
 
 
 # ---------------------------------------------------------------------------
