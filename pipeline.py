@@ -108,7 +108,8 @@ def call_llm(system, user, history=None):
     )
     data = r.json()
     if "choices" not in data:
-        raise RuntimeError(f"OpenRouter error: {data}")
+        err = data.get("error", data) if isinstance(data, dict) else data
+        raise RuntimeError(f"OpenRouter error: {str(err)[:500]}")
     return data["choices"][0]["message"]["content"]
 
 
@@ -225,7 +226,10 @@ def print_extraction(employees):
 
 
 def save_extraction(config, employees, assumptions, path="extracted_input.json"):
-    with open(path, "w") as f:
+    # Holds employee PII (names, wages, availability). Write owner-only (0600) and keep
+    # it out of version control (.gitignore). Treat as sensitive data at rest.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump({"config": config, "employees": employees, "assumptions": assumptions}, f, indent=2)
 
 

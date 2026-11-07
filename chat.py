@@ -18,10 +18,13 @@ while True:
         "https://openrouter.ai/api/v1/chat/completions",
         headers={"Authorization": f"Bearer {KEY}"},
         json={"model": MODEL, "messages": messages},
+        timeout=60,  # don't hang forever on a stalled connection
     )
     data = r.json()
     if "choices" not in data:
-        print("Error:", data)
+        # show the provider's error message only, not the whole payload
+        err = data.get("error", data) if isinstance(data, dict) else data
+        print("Error:", str(err)[:500])
         messages.pop()  # drop the failed turn
         continue
 

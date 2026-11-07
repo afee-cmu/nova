@@ -331,9 +331,31 @@ def employee_summary(assignments, employees):
 # ---------------------------------------------------------------------------
 # 4. Export to Excel
 # ---------------------------------------------------------------------------
+# Excel/CSV formula injection: Excel and Google Sheets treat a cell whose text starts
+# with = + - @ (or a leading tab/CR) as a FORMULA when the file is opened. Employee
+# names and other free text flow into this export, so a name like '=HYPERLINK("http://evil",...)'
+# would execute on open. Neutralize such cells with a leading apostrophe.
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _excel_safe(v):
+    return "'" + v if isinstance(v, str) and v[:1] in _FORMULA_LEAD else v
+
+
+def _sanitize_df(df):
+    # Map every cell (no-op on non-strings). Don't gate on dtype == object: newer pandas
+    # gives string columns a dedicated 'str' dtype, which that check would skip.
+    for col in df.columns:
+        df[col] = df[col].map(_excel_safe)
+    return df
+
+
 def export_schedule_xlsx(result, path="schedule.xlsx", summary=None):
     """Writes Schedule (grid), Assignments, Employees, Gaps, Cost and optional Summary tabs.
-    `summary` is the LLM's plain-English explanation; call again with it once you have it."""
+    `summary` is the LLM's plain-English explanation; call again with it once you have it.
+    All string cells are sanitized against spreadsheet formula injection, and the file is
+    written owner-only (0600) because it contains employee PII."""
+    import os
     import pandas as pd
     from openpyxl.styles import Alignment, Font
 
@@ -344,12 +366,13 @@ def export_schedule_xlsx(result, path="schedule.xlsx", summary=None):
         for e in result["employees"]
     }
 
-    grid = pd.DataFrame("", index=list(label.values()), columns=DAY_ORDER)
+    grid = pd.DataFrame("", index=[_excel_safe(v) for v in label.values()], columns=DAY_ORDER)
     for a in result["assignments"]:
-        row = label[a["employee_id"]]
+        row = _excel_safe(label[a["employee_id"]])
         line = f"{a['window']} {a['start']}-{a['end']} ({a['role']})"
         current = grid.loc[row, a["day"]]
         grid.loc[row, a["day"]] = f"{current}\n{line}" if current else line
+    grid = _sanitize_df(grid)
 
     employees_df = pd.DataFrame(result["employees"])
     for col in ("roles_worked", "available_but_unassigned"):
@@ -360,14 +383,15 @@ def export_schedule_xlsx(result, path="schedule.xlsx", summary=None):
 
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         grid.to_excel(writer, sheet_name="Schedule")
-        pd.DataFrame(result["assignments"]).to_excel(writer, sheet_name="Assignments", index=False)
-        employees_df.to_excel(writer, sheet_name="Employees", index=False)
-        gaps_df.to_excel(writer, sheet_name="Gaps", index=False)
+        _sanitize_df(pd.DataFrame(result["assignments"])).to_excel(writer, sheet_name="Assignments", index=False)
+        _sanitize_df(employees_df).to_excel(writer, sheet_name="Employees", index=False)
+        _sanitize_df(gaps_df).to_excel(writer, sheet_name="Gaps", index=False)
         cost_df.to_excel(writer, sheet_name="Cost", index=False)
         if result.get("warnings"):
-            pd.DataFrame(result["warnings"]).to_excel(writer, sheet_name="Warnings", index=False)
+            _sanitize_df(pd.DataFrame(result["warnings"])).to_excel(writer, sheet_name="Warnings", index=False)
         if summary:
-            pd.DataFrame({"Summary": summary.split("\n")}).to_excel(writer, sheet_name="Summary", index=False)
+            sdf = _sanitize_df(pd.DataFrame({"Summary": summary.split("\n")}))
+            sdf.to_excel(writer, sheet_name="Summary", index=False)
 
         # Make the grid readable
         ws = writer.sheets["Schedule"]
@@ -379,6 +403,7 @@ def export_schedule_xlsx(result, path="schedule.xlsx", summary=None):
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
         for cell in ws[1]:
             cell.font = Font(bold=True)
+    os.chmod(path, 0o600)   # employee PII: owner-only at rest
     return path
 
 
