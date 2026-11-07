@@ -419,6 +419,9 @@ def to_scheduler_inputs(data):
             "max_hours": e["max_hours_week"] if e["max_hours_week"] is not None else 0,
             "available": available,
         }
+        # scheduler.py ignores unknown keys; reoptimize.py uses min_hours for rights flags
+        if e["min_hours_week"]:
+            emp["min_hours"] = e["min_hours_week"]
         if e["max_shifts_week"] is not None:
             emp["max_shifts"] = e["max_shifts_week"]
         employees.append(emp)
