@@ -4,6 +4,8 @@ End-to-end pipeline: messy manager documents -> LLM -> validated JSON -> solver 
   1. LLM reads the restaurant setup note   -> config (role rates + rush windows)
   2. LLM reads the availability document   -> employee profiles (exact shift names)
      Both steps are validated in code; any errors go back to the LLM to fix.
+     The manager reviews what was understood and corrects it in plain English
+     ("Chris can't do Saturday lunch"); code shows exactly what changed; "undo" reverts.
   3. scheduler.run_pipeline                 -> optimal schedule
   4. LLM writes a plain-English summary     -> added to the Excel file
 
@@ -74,6 +76,16 @@ Rules:
 - Ids are emp_001, emp_002, ... in roster order.
 - Record every interpretation in "assumptions" (e.g. "Read 'nights' as dinner shifts for Alex").
 """
+
+CORRECTION_PROMPT = """You update a restaurant's employee roster JSON based on a manager's correction.
+You get the current JSON and one correction. Apply ONLY what the correction asks for and keep everything else
+exactly the same. Output ONLY the full updated JSON object, same format: {"employees": [...], "assumptions": [...]}.
+- Valid roles: {ROLES}
+- Valid shift names. Use these EXACT strings and nothing else:
+{SHIFTS}
+- Interpret shift words as before: "lunch"/"mornings" -> lunch shifts, "dinner"/"nights"/"evenings" -> dinner shifts.
+- Remove or rewrite any assumption the correction makes wrong, and add one noting the manager's correction.
+- If the correction names someone not on the roster, add them with a new id only if the manager clearly says to add them."""
 
 SUMMARY_PROMPT = """You write the opening of a weekly staff schedule report for a busy restaurant manager.
 Write 2-3 sentences of plain text (no markdown, no asterisks, no lists) using ONLY the facts in the JSON:
@@ -212,6 +224,80 @@ def print_extraction(employees):
         print(f"        available: {avail}")
 
 
+def save_extraction(config, employees, assumptions, path="extracted_input.json"):
+    with open(path, "w") as f:
+        json.dump({"config": config, "employees": employees, "assumptions": assumptions}, f, indent=2)
+
+
+def _pretty(shift):
+    return shift.replace("_", " ")
+
+
+def describe_changes(old, new):
+    """Code-generated diff, so the manager sees exactly what the AI changed."""
+    old_by, new_by = {e["id"]: e for e in old}, {e["id"]: e for e in new}
+    lines = []
+    for eid, e in new_by.items():
+        o = old_by.get(eid)
+        if o is None:
+            lines.append(f"Added {e['name']}")
+            continue
+        changes = []
+        added = [s for s in e["available"] if s not in o["available"]]
+        removed = [s for s in o["available"] if s not in e["available"]]
+        if added:
+            changes.append("now available " + ", ".join(map(_pretty, added)))
+        if removed:
+            changes.append("no longer available " + ", ".join(map(_pretty, removed)))
+        for field in ("name", "roles", "min_hours", "max_hours", "max_shifts"):
+            if e.get(field) != o.get(field):
+                changes.append(f"{field} {o.get(field)} -> {e.get(field)}")
+        if changes:
+            lines.append(f"{e['name']}: " + "; ".join(changes))
+    lines += [f"Removed {o['name']}" for eid, o in old_by.items() if eid not in new_by]
+    return lines
+
+
+def review_loop(config, employees, assumptions, shifts, demand):
+    """Let the manager correct the AI's reading in plain English before solving."""
+    prompt = (CORRECTION_PROMPT
+              .replace("{ROLES}", ", ".join(config["default_role_rates"]))
+              .replace("{SHIFTS}", ", ".join(shifts)))
+    check = make_employee_check(config, shifts, demand)
+    history = []  # previous states, for undo
+
+    while True:
+        text = input('\n    Type a correction (e.g. "Sam said Thursday dinner, not lunch"), "undo", '
+                     "or press Enter to build the schedule:\n    > ").strip()
+        if not text:
+            return employees, assumptions
+        if text.lower() == "undo":
+            if history:
+                employees, assumptions = history.pop()
+                print("    Undid the last change. Current roster:")
+                print_extraction(employees)
+            else:
+                print("    Nothing to undo.")
+            continue
+
+        current = json.dumps({"employees": employees, "assumptions": assumptions})
+        try:
+            updated = ask_for_json(prompt, f"Current JSON:\n{current}\n\nManager's correction: {text}", check)
+        except RuntimeError as e:
+            print(f"    Couldn't apply that: {e}")
+            continue
+
+        changes = describe_changes(employees, updated["employees"])
+        if not changes:
+            print("    Nothing changed. Try naming the employee and the shift, e.g. \"Chris can't do Saturday lunch\".")
+            continue
+        history.append((employees, assumptions))
+        employees, assumptions = updated["employees"], updated.get("assumptions", assumptions)
+        print("    Updated:")
+        for line in changes:
+            print(f"      {line}")
+
+
 def format_gaps(gaps_with_candidates):
     """Plain-English gap list written by code, so every name and reason is exact."""
     if not gaps_with_candidates:
@@ -251,23 +337,13 @@ def main(setup_path, availability_path, xlsx_path="schedule.xlsx", confirm=True)
     employees = roster["employees"]
     print(f"    {len(employees)} employees: {', '.join(e['name'] for e in employees)}")
 
-    assumptions = config.get("assumptions", []) + roster.get("assumptions", [])
-    with open("extracted_input.json", "w") as f:
-        json.dump({"config": config, "employees": employees, "assumptions": assumptions}, f, indent=2)
-
     print("\n    Here's what I understood:")
     print_extraction(employees)
+    roster_assumptions = roster.get("assumptions", [])
     if confirm:
-        input("\n    Fix anything wrong in extracted_input.json, save it, then press Enter to build the schedule...")
-        with open("extracted_input.json") as f:
-            edited = json.load(f)
-        config, employees = edited["config"], edited["employees"]
-        assumptions = edited.get("assumptions", assumptions)
-        errors = check_setup(config)
-        shifts, demand = build_shifts(config["rush_profile"]) if not errors else ({}, [])
-        errors = errors or validate_input(employees, config, shifts, demand)
-        if errors:
-            sys.exit("extracted_input.json has problems:\n- " + "\n- ".join(errors))
+        employees, roster_assumptions = review_loop(config, employees, roster_assumptions, shifts, demand)
+    assumptions = config.get("assumptions", []) + roster_assumptions
+    save_extraction(config, employees, assumptions)
 
     print("3/4 Solving schedule...")
     result = run_pipeline(employees, config)
