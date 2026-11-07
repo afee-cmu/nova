@@ -28,7 +28,9 @@ CLI:
 """
 from __future__ import annotations
 
+import os
 import sys
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -39,6 +41,38 @@ EMP_TYPES = {"Full-time", "Part-time"}
 PREFS = {"Preferred", "Available", "Avoid"}
 REQUIRED_SHEETS = ["Roles", "Tasks", "Employees", "Availability",
                    "Proficiency", "RushWindows", "Policy"]
+
+# Guards for UNTRUSTED uploads: an .xlsx is a zip, so a small file can expand into
+# gigabytes ("zip bomb") and exhaust memory the moment openpyxl loads it. Check the
+# zip's declared sizes BEFORE loading, and reject anything implausible for a roster.
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024          # 15 MB on disk
+MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024   # 200 MB decompressed across all parts
+MAX_COMPRESSION_RATIO = 200                  # decompressed / compressed
+
+
+def preflight_upload(path):
+    """Cheap safety check on an untrusted .xlsx before openpyxl ever opens it.
+    Returns an error string if the file is unsafe/implausible, else None."""
+    try:
+        size = os.path.getsize(path)
+    except OSError as e:
+        return f"cannot read file: {e}"
+    if size > MAX_UPLOAD_BYTES:
+        return f"file is {size // 1024 // 1024} MB; limit is {MAX_UPLOAD_BYTES // 1024 // 1024} MB"
+    if not zipfile.is_zipfile(path):
+        return "not a valid .xlsx file (an .xlsx is a zip archive)"
+    try:
+        with zipfile.ZipFile(path) as z:
+            total = sum(i.file_size for i in z.infolist())
+            comp = sum(i.compress_size for i in z.infolist()) or 1
+    except zipfile.BadZipFile as e:
+        return f"corrupt .xlsx: {e}"
+    if total > MAX_UNCOMPRESSED_BYTES:
+        return (f"file expands to {total // 1024 // 1024} MB, over the "
+                f"{MAX_UNCOMPRESSED_BYTES // 1024 // 1024} MB limit — refusing (possible zip bomb)")
+    if total / comp > MAX_COMPRESSION_RATIO:
+        return f"suspicious compression ratio ({total // comp}x) — refusing (possible zip bomb)"
+    return None
 
 # Exact example rows shipped in the template; skip a row ONLY if it still matches its
 # example exactly, so any edit turns it into real data (nothing is silently dropped).
@@ -132,6 +166,12 @@ def _num(row, key, where, issues, default=None, required=False):
 # ---------------------------------------------------------------------------
 def load_workbook_input(path):
     issues = Issues()
+
+    unsafe = preflight_upload(path)   # guard untrusted uploads BEFORE loading
+    if unsafe:
+        issues.error(f"Rejected upload: {unsafe}")
+        return None, issues
+
     wb = openpyxl.load_workbook(path, data_only=True)
 
     for s in REQUIRED_SHEETS:
@@ -376,18 +416,26 @@ def load_workbook_input(path):
 # ---------------------------------------------------------------------------
 # Adapt to scheduler.py's inputs
 # ---------------------------------------------------------------------------
+def _role(task):
+    """Scheduler roles are lowercase (matching pipeline.py's convention). The workbook
+    keeps human-friendly task names (e.g. 'Fry Station'); the solver sees 'fry station'."""
+    return task.strip().lower()
+
+
 def to_scheduler_inputs(data):
     """Convert normalized `data` into (employees, config) for scheduler.run_pipeline.
 
-    - config.default_role_rates : {task: default wage}  (tasks that have a wage)
-    - config.rush_profile       : {day: [{name, window, staff:{task: n}}]}  (per-day)
-    - employees[*].roles        : {task: per-person wage or None}  (from Proficiency)
+    - config.default_role_rates : {role: default wage}  (tasks that have a wage)
+    - config.rush_profile       : {day: [{name, window, staff:{role: n}}]}  (per-day)
+    - employees[*].roles        : {role: per-person wage or None}  (from Proficiency)
     - employees[*].available    : ["<Day>_<window_label>"] covered by availability blocks
     - employees[*].max_hours    : max_hours_week   (hard cap; no overtime)
     - employees[*].max_shifts   : max_shifts_week  (omitted if blank)
+
+    Task names are lowercased to roles (see _role) so this path and pipeline.py agree.
     """
     config = {
-        "default_role_rates": {name: t["default_hourly_rate"]
+        "default_role_rates": {_role(name): t["default_hourly_rate"]
                                for name, t in data["tasks"].items()
                                if t["default_hourly_rate"] is not None},
         "rush_profile": _build_rush_profile(data["demand"]),
@@ -415,10 +463,13 @@ def to_scheduler_inputs(data):
             "id": e["employee_id"],
             "name": e["name"],
             # eligibility + wage per task; None wage -> scheduler uses the task default
-            "roles": {task: sk["hourly_rate"] for task, sk in e["task_skills"].items()},
+            "roles": {_role(task): sk["hourly_rate"] for task, sk in e["task_skills"].items()},
             "max_hours": e["max_hours_week"] if e["max_hours_week"] is not None else 0,
             "available": available,
         }
+        # scheduler.py ignores unknown keys; reoptimize.py uses min_hours for rights flags
+        if e["min_hours_week"]:
+            emp["min_hours"] = e["min_hours_week"]
         if e["max_shifts_week"] is not None:
             emp["max_shifts"] = e["max_shifts_week"]
         employees.append(emp)
@@ -438,7 +489,8 @@ def _build_rush_profile(demand):
                   "window": f"{_hhmm(d['start_min'])}-{_hhmm(d['end_min'])}",
                   "staff": {}})
         if d["required_staff"]:
-            entry["staff"][d["task"]] = entry["staff"].get(d["task"], 0) + d["required_staff"]
+            role = _role(d["task"])
+            entry["staff"][role] = entry["staff"].get(role, 0) + d["required_staff"]
 
     profile = {}
     for (day, _label), entry in by_day_label.items():

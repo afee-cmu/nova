@@ -322,12 +322,12 @@ class TestAdapter(Base):
         self.emps, self.config = to_scheduler_inputs(self.data)
 
     def test_default_role_rates_from_tasks(self):
-        self.assertEqual(self.config["default_role_rates"]["Fry Station"], 16.0)
-        self.assertEqual(self.config["default_role_rates"]["Register"], 14.0)
+        self.assertEqual(self.config["default_role_rates"]["fry station"], 16.0)
+        self.assertEqual(self.config["default_role_rates"]["register"], 14.0)
 
     def test_employee_roles_from_proficiency(self):
         alex = next(e for e in self.emps if e["id"] == "E010")
-        self.assertEqual(alex["roles"], {"Fry Station": None})  # None -> use task default
+        self.assertEqual(alex["roles"], {"fry station": None})  # None -> use task default
         self.assertEqual(alex["max_hours"], 40)
         self.assertEqual(alex["max_shifts"], 5)
 
@@ -339,7 +339,7 @@ class TestAdapter(Base):
         ]))
         emps, _ = to_scheduler_inputs(data)
         alex = next(e for e in emps if e["id"] == "E010")
-        self.assertEqual(alex["roles"]["Fry Station"], 21.5)
+        self.assertEqual(alex["roles"]["fry station"], 21.5)
 
     def test_availability_coverage_to_shifts(self):
         alex = next(e for e in self.emps if e["id"] == "E010")   # Mon 09:00-17:00
@@ -364,7 +364,7 @@ class TestAdapter(Base):
         mon = self.config["rush_profile"]["Mon"][0]
         self.assertEqual(mon["name"], "Lunch")
         self.assertEqual(mon["window"], "11:30-14:00")
-        self.assertEqual(mon["staff"], {"Fry Station": 1})
+        self.assertEqual(mon["staff"], {"fry station": 1})
 
     def test_max_shifts_omitted_when_blank(self):
         data, _ = self.load(self.mutate(Employees=[
@@ -397,8 +397,8 @@ class TestEndToEndScheduler(Base):
         self.assertIn(result["status"], ("optimal", "feasible"), result)
         self.assertEqual(result["gaps"], [], result["gaps"])
         roles_assigned = {(a["employee_id"], a["role"]) for a in result["assignments"]}
-        self.assertIn(("E010", "Fry Station"), roles_assigned)
-        self.assertIn(("E011", "Register"), roles_assigned)
+        self.assertIn(("E010", "fry station"), roles_assigned)
+        self.assertIn(("E011", "register"), roles_assigned)
 
 
 class TestParseTimeUnit(unittest.TestCase):
