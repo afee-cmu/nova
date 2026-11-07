@@ -5,7 +5,7 @@
 From the repository root, install the backend dependencies:
 
 ```bash
-python -m pip install fastapi uvicorn requests
+python -m pip install fastapi uvicorn requests openpyxl ortools python-multipart
 ```
 
 For AI parsing, set the OpenRouter key in the same terminal before starting the server:

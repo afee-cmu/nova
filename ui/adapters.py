@@ -40,26 +40,59 @@ def explain(schedule=None, *args, **kwargs):
     return {"summary": summary, "gap_explanations": descriptions}
 
 
-def parse_update(message, employees):
-    """Offline keyword fallback for schedule updates when AI parsing is unavailable."""
+def parse_update(message, employees, schedule):
+    """Keyword fallback matching the current roster, tasks, and named windows."""
     normalized = (message or "").lower().replace("’", "'")
     employee = next((person for person in sorted(employees, key=lambda item: len(item["name"]), reverse=True)
                      if re.search(rf"\b{re.escape(person['name'].lower())}\b", normalized)), None)
-    day = None
-    for alias, label in DAYS.items():
-        if re.search(rf"\b{alias}\b", normalized):
-            day = label
-            break
-    shift = next((name for name in ("lunch", "dinner") if re.search(rf"\b{name}\b", normalized)), None)
-    role = next((name for name in ROLES if re.search(rf"\b{name}\b", normalized)), None)
+
+    days_present = {window["day"] for window in schedule.get("windows", [])}
+    day_aliases = {
+        "Mon": ("mon", "monday"), "Tue": ("tue", "tues", "tuesday"),
+        "Wed": ("wed", "wednesday"), "Thu": ("thu", "thur", "thurs", "thursday"),
+        "Fri": ("fri", "friday"), "Sat": ("sat", "saturday"), "Sun": ("sun", "sunday"),
+    }
+    day = next((label for label in day_aliases if label in days_present and
+                any(re.search(rf"\b{re.escape(alias)}\b", normalized) for alias in day_aliases[label])), None)
+
+    windows = schedule.get("windows", [])
+    day_windows = [window for window in windows if day is None or window["day"] == day]
+    matched = [window for window in day_windows
+               if window["name"].lower() in normalized or window["key"].lower().replace("_", " ") in normalized]
+    if not matched:
+        synonyms = {
+            "lunch": ("lunch", "morning", "midday"),
+            "dinner": ("dinner", "evening", "night", "tonight"),
+        }
+        for aliases in synonyms.values():
+            if any(re.search(rf"\b{re.escape(alias)}\b", normalized) for alias in aliases):
+                matched = [window for window in day_windows
+                           if any(alias in window["name"].lower() for alias in aliases)]
+                if matched:
+                    break
+    window_name = matched[0]["name"] if matched else None
+
+    tasks = schedule.get("tasks", [])
+    matched_tasks = [task for task in tasks if task.lower() in normalized]
+    if not matched_tasks:
+        task_synonyms = {
+            "register": ("cashier", "register", "front counter"),
+            "expo": ("expediter", "expediting", "packing"),
+            "pack": ("packer", "packing", "pack"),
+            "grill": ("grill", "line cook", "cooking"),
+            "fry": ("fry", "fryer", "fry station"),
+        }
+        for task in tasks:
+            aliases = [task.lower()]
+            for key, synonyms in task_synonyms.items():
+                if key in task.lower():
+                    aliases.extend(synonyms)
+            if any(re.search(rf"\b{re.escape(alias)}\b", normalized) for alias in aliases):
+                matched_tasks.append(task)
+    task = max(matched_tasks, key=len) if matched_tasks else None
 
     callout = any(term in normalized for term in ("called out", "sick", "can't come", "cannot come", "cant come")) or bool(re.search(r"\boff\b", normalized))
     cover = any(term in normalized for term in ("cover", "covers", "will take", "can take", "pick up", "pick-up"))
     update_type = "callout" if callout else "cover" if cover else "unknown"
-    return {
-        "type": update_type,
-        "employee": employee,
-        "day": day,
-        "shift": shift,
-        "role": role,
-    }
+    return {"type": update_type, "employee": employee, "day": day,
+            "shift": window_name, "role": task}

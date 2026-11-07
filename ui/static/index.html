@@ -9,17 +9,12 @@
     :root { --dd-red: #FF3008; --maroon: #5C0000; --ink: #24201f; --muted: #766d69; --line: #e9e5e3; --paper: #f6f5f4; }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--paper); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    .role-grill { --role: #ffede8; --role-ink: #a9280c; }
-    .role-fry { --role: #fff2d6; --role-ink: #815a00; }
-    .role-prep { --role: #e7f4eb; --role-ink: #276642; }
-    .role-cashier { --role: #edeaff; --role-ink: #51439a; }
-    .role-pack { --role: #e4f2f7; --role-ink: #25627a; }
-    .employee-chip { display: flex; width: 100%; align-items: center; gap: 10px; border: 1px solid #eee9e7; background: white; border-radius: 12px; padding: 10px 11px; text-align: left; transition: transform .15s, box-shadow .15s; }
+    .employee-chip { display: flex; width: 100%; align-items: center; gap: 10px; border: 1px solid #eee9e7; background: white; border-radius: 12px; padding: 9px 10px; text-align: left; transition: transform .15s, box-shadow .15s; }
     .employee-chip:hover { transform: translateY(-1px); box-shadow: 0 4px 12px #311b1512; }
-    .role-dot, .legend-dot { background: var(--role-ink); flex: none; }
-    .role-dot { width: 9px; height: 9px; border-radius: 50%; }
-    .role-pill { background: var(--role); color: var(--role-ink); }
-    .schedule-cell { min-height: 172px; }
+    .task-dot, .legend-dot { background: var(--task-ink); flex: none; }
+    .task-dot { width: 9px; height: 9px; border-radius: 50%; }
+    .task-pill { background: var(--task-bg); color: var(--task-ink); }
+    .window-card { min-height: 132px; }
     .gap-cell { border-color: #ff8d79 !important; background: #fff8f6 !important; }
     .drawer-backdrop { position: fixed; inset: 0; z-index: 40; background: #21171466; opacity: 0; pointer-events: none; transition: opacity .2s; }
     .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
@@ -36,10 +31,12 @@
     .gap-card.is-dismissing { opacity: 0; transform: translateY(-5px); }
     @keyframes schedule-change-flash { 0%, 100% { background-color: inherit; } 15%, 75% { background-color: #fff0b8; box-shadow: 0 0 0 2px #f1c644; } }
     .schedule-updated { animation: schedule-change-flash 2s ease-out; }
+    .schedule-scroll { overflow-x: auto; }
+    .schedule-grid { min-width: 1020px; }
     .chat-scroll { max-height: 170px; overflow-y: auto; }
     @media (max-width: 640px) { .chat-scroll { max-height: 120px; } }
     @media (max-width: 1099px) { .schedule-layout { grid-template-columns: minmax(0, 1fr); } .insights-panel { max-height: none; overflow: visible; } }
-    @media (max-width: 900px) { .schedule-scroll { overflow-x: auto; } .schedule-grid { min-width: 980px; } }
+
   </style>
 </head>
 <body>
@@ -50,11 +47,35 @@
         <div><p class="text-xs font-bold uppercase tracking-[.18em] text-[#8d807b]">Restaurant operations</p><h1 class="text-3xl font-extrabold tracking-tight text-[#5C0000] md:text-4xl">BonApp</h1></div>
       </div>
       <div id="load-error" class="hidden max-w-xl rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-800" role="alert"></div>
-      <div class="flex flex-wrap items-center gap-3"><button id="reset-demo" class="rounded-xl border border-[#e2d9d5] bg-white px-4 py-2.5 text-sm font-bold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Reset demo</button><div id="status-chip" class="rounded-full border border-[#ffd2c8] bg-white px-4 py-2 text-sm font-bold text-[#5C0000]">Loading schedule…</div><div id="ai-mode-badge" class="rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600">Checking AI mode…</div></div>
+      <div class="flex flex-wrap items-center gap-3"><button id="show-data-in" class="rounded-xl border border-[#ffd2c8] bg-[#fff7f5] px-4 py-2.5 text-sm font-bold text-[#a52b10] shadow-sm hover:border-[#FF3008]">Data In</button><button id="reset-demo" class="rounded-xl border border-[#e2d9d5] bg-white px-4 py-2.5 text-sm font-bold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Reset demo</button><div id="status-chip" class="rounded-full border border-[#ffd2c8] bg-white px-4 py-2 text-sm font-bold text-[#5C0000]">Choose data</div><div id="data-source-badge" class="rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600">No schedule yet</div><div id="ai-mode-badge" class="rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600">Checking AI mode…</div></div>
     </header>
 
+    <section id="data-in-view" class="mx-auto max-w-4xl">
+      <div class="rounded-3xl border border-[#eee9e7] bg-white p-6 shadow-sm md:p-10">
+        <p class="text-sm font-extrabold uppercase tracking-[.18em] text-[#FF3008]">Data In</p>
+        <h2 class="mt-2 text-3xl font-extrabold tracking-tight text-[#5C0000] md:text-4xl">Start with your team workbook</h2>
+        <p class="mt-3 max-w-2xl text-lg leading-relaxed text-[#766d69]">Upload the BonApp scheduling workbook to validate your roster, availability, tasks, and rush windows.</p>
+        <div id="drop-zone" class="mt-7 rounded-2xl border-2 border-dashed border-[#e7c3ba] bg-[#fff9f7] px-6 py-9 text-center transition hover:border-[#FF3008] hover:bg-[#fff4f0]">
+          <div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-white text-3xl text-[#FF3008] shadow-sm">↑</div>
+          <p class="mt-4 text-xl font-extrabold text-[#5C0000]">Drop your .xlsx workbook here</p>
+          <p class="mt-1 text-sm text-[#766d69]">Maximum file size: 5 MB</p>
+          <input id="workbook-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
+          <button id="choose-file" type="button" class="mt-4 rounded-xl border border-[#e2d9d5] bg-white px-5 py-3 font-bold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Choose file</button>
+          <div id="selected-file" class="mt-4 hidden rounded-xl bg-white px-4 py-3 text-sm font-bold text-[#554b47]"></div>
+        </div>
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-3"><a href="/api/template" class="font-bold text-[#a52b10] underline decoration-dotted underline-offset-4">Download template</a><button id="back-to-schedule" type="button" class="hidden rounded-xl px-4 py-2 font-bold text-[#5C0000] hover:bg-[#f7f5f4]">View current schedule</button></div>
+        <div id="upload-error" class="mt-5 hidden rounded-2xl border border-red-200 bg-red-50 p-5 text-red-900" role="alert"></div>
+        <div id="upload-loading" class="mt-6 hidden rounded-2xl border border-[#f1d8a8] bg-[#fffaf0] p-5">
+          <div class="flex items-center gap-3"><span class="h-6 w-6 animate-spin rounded-full border-4 border-[#f4c6b9] border-t-[#FF3008]"></span><p class="text-lg font-extrabold text-[#5C0000]">Preparing your schedule</p></div>
+          <ol id="upload-steps" class="mt-4 grid gap-2 text-sm font-semibold text-[#8d807b] sm:grid-cols-2"><li data-step="0">1. Reading file</li><li data-step="1">2. Validating</li><li data-step="2">3. Solving</li><li data-step="3">4. Preparing insights</li></ol>
+        </div>
+        <div class="mt-7 grid gap-3 sm:grid-cols-2"><button id="generate-schedule" type="button" disabled class="rounded-xl bg-[#FF3008] px-5 py-4 text-lg font-extrabold text-white shadow-sm transition hover:bg-[#e92b07] disabled:cursor-not-allowed disabled:opacity-40">Generate schedule</button><button id="use-demo" type="button" class="rounded-xl border border-[#ded5d1] bg-white px-5 py-4 text-lg font-extrabold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Use demo data</button></div>
+      </div>
+    </section>
+
+    <div id="schedule-view" class="hidden">
     <section class="mb-7 grid gap-4 md:grid-cols-3" aria-label="Schedule overview">
-      <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-[#766d69]">Total labor cost</p><p id="stat-cost" class="mt-2 text-3xl font-extrabold tracking-tight">—</p><p class="mt-1 text-sm text-[#918782]">Scheduled hours × hourly wage</p></article>
+      <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-[#766d69]">Labor cost</p><p id="stat-cost" class="mt-2 text-3xl font-extrabold tracking-tight">—</p><p class="mt-1 text-sm text-[#918782]">Across scheduled task assignments</p></article>
       <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-[#766d69]">Coverage rate</p><p id="stat-coverage" class="mt-2 text-3xl font-extrabold tracking-tight">—</p><p class="mt-1 text-sm text-[#918782]">Filled staffing slots</p></article>
       <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-[#766d69]">Coverage gaps</p><p id="stat-gaps" class="mt-2 text-3xl font-extrabold tracking-tight">—</p><p class="mt-1 text-sm text-[#918782]">Roles needing attention</p></article>
     </section>
@@ -62,10 +83,12 @@
     <div class="schedule-layout">
     <section class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm md:p-6">
       <div class="mb-5 flex flex-wrap items-end justify-between gap-3"><div><p class="text-xs font-bold uppercase tracking-[.16em] text-[#FF3008]">Weekly overview</p><h2 class="mt-1 text-2xl font-extrabold tracking-tight md:text-3xl">Team schedule</h2></div><p class="text-sm text-[#766d69]">Select an employee to view shift details</p></div>
+      <details id="warnings-panel" class="mb-4 hidden rounded-xl border border-[#f1d8a8] bg-[#fffaf0] p-3">
+        <summary id="warnings-title" class="cursor-pointer text-sm font-bold text-[#805400]"></summary>
+        <ul id="warnings-list" class="mt-2 list-disc space-y-1 pl-5 text-sm text-[#665641]"></ul>
+      </details>
       <div id="legend" class="mb-5 flex flex-wrap gap-x-5 gap-y-2"></div>
-      <div class="schedule-scroll">
-        <div id="schedule-grid" class="schedule-grid grid grid-cols-[92px_repeat(7,minmax(118px,1fr))] gap-2" aria-label="Weekly schedule"></div>
-      </div>
+      <div class="schedule-scroll"><div id="schedule-grid" class="schedule-grid grid grid-cols-7 gap-2" aria-label="Weekly schedule"></div></div>
     </section>
 
     <aside class="insights-panel rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm md:p-6" aria-labelledby="insights-title">
@@ -75,6 +98,7 @@
     </aside>
     </div>
     <p id="error-message" class="mt-5 hidden rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-800"></p>
+    </div>
   </main>
 
   <section id="update-bar" class="fixed inset-x-0 bottom-0 z-30 border-t border-[#e7dfdb] bg-white/95 px-4 py-3 shadow-[0_-8px_30px_#24140f12] backdrop-blur md:px-8">
@@ -83,12 +107,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="font-extrabold">Manager approval needed: possible premium pay</p><p id="approval-reason" class="mt-1"></p></div><div class="flex gap-2"><button id="approve-change" class="rounded-lg bg-[#FF3008] px-4 py-2 font-bold text-white">Approve</button><button id="reject-change" class="rounded-lg border border-[#d8b27c] bg-white px-4 py-2 font-bold text-[#754500]">Reject</button></div></div>
       </div>
       <div id="chat-messages" class="chat-scroll mb-2 space-y-2" aria-live="polite"></div>
-      <div class="mb-2 flex flex-wrap gap-2">
-        <button type="button" class="example-chip rounded-full border border-[#f2c5bb] bg-[#fff7f5] px-3 py-1.5 text-xs font-bold text-[#8f260e]">Maria called out Friday dinner</button>
-        <button type="button" class="example-chip rounded-full border border-[#f2c5bb] bg-[#fff7f5] px-3 py-1.5 text-xs font-bold text-[#8f260e]">Leo will cover Saturday dinner grill</button>
-        <button type="button" class="example-chip rounded-full border border-[#f2c5bb] bg-[#fff7f5] px-3 py-1.5 text-xs font-bold text-[#8f260e]">Maria will cover Saturday dinner grill</button>
-        <button type="button" class="example-chip rounded-full border border-[#ded7d3] bg-white px-3 py-1.5 text-xs font-bold text-[#5C0000]">Who is working Friday dinner?</button>
-      </div>
+      <div id="example-chips" class="mb-2 flex flex-wrap gap-2"></div>
       <form id="update-form" class="flex gap-2">
         <input id="update-input" autocomplete="off" class="min-w-0 flex-1 rounded-xl border border-[#ddd5d1] bg-[#faf9f8] px-4 py-3 text-sm outline-none placeholder:text-[#9a8e89] focus:border-[#FF3008]" placeholder="Tell BonApp what changed, or ask a question…" aria-label="Schedule update message">
         <button id="send-update" class="rounded-xl bg-[#FF3008] px-6 py-3 text-sm font-extrabold text-white disabled:opacity-60" type="submit">Send</button>
@@ -104,69 +123,91 @@
 
   <script>
     const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const SHIFTS = ['lunch', 'dinner'];
-    const ROLE_NAMES = ['grill', 'fry', 'prep', 'cashier', 'pack'];
+    const TASK_PALETTE = [
+      ['#ffede8', '#a9280c'], ['#fff2d6', '#815a00'], ['#e7f4eb', '#276642'],
+      ['#edeaff', '#51439a'], ['#e4f2f7', '#25627a'], ['#fce7f3', '#9d174d'],
+      ['#e7eefa', '#294e83'], ['#f1f5df', '#50631e'], ['#f0e6dc', '#744a25']
+    ];
     let pageData = null;
     const dismissedGapIds = new Set();
     let toastTimer = null;
     let copiedTimer = null;
     let chatMessages = [];
     let pendingApprovalId = null;
-    const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
-    const esc = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-
+    let generatedThisSession = false;
+    let selectedWorkbook = null;
+    const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value || 0);
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    function taskColor(task) {
+      let hash = 0;
+      for (const char of String(task)) hash = ((hash * 31) + char.toLowerCase().charCodeAt(0)) >>> 0;
+      return TASK_PALETTE[hash % TASK_PALETTE.length];
+    }
+    function taskStyle(task) {
+      const [bg, ink] = taskColor(task);
+      return `--task-bg:${bg};--task-ink:${ink}`;
+    }
     function renderLegend() {
-      document.getElementById('legend').innerHTML = ROLE_NAMES.map(role => `<span class="role-${role} inline-flex items-center gap-2 text-sm font-semibold capitalize text-[#554b47]"><i class="legend-dot h-2.5 w-2.5 rounded-full"></i>${role}</span>`).join('');
+      const tasks = pageData?.schedule?.tasks || [];
+      document.getElementById('legend').innerHTML = tasks.map(task => `<span style="${taskStyle(task)}" class="inline-flex items-center gap-2 text-sm font-semibold text-[#554b47]"><i class="legend-dot h-2.5 w-2.5 rounded-full"></i>${esc(task)}</span>`).join('');
     }
     function renderStats(schedule) {
-      document.getElementById('stat-cost').textContent = money(schedule.total_cost);
+      document.getElementById('stat-cost').textContent = money(schedule.labor_cost);
       document.getElementById('stat-coverage').textContent = `${(schedule.coverage_rate * 100).toFixed(1)}%`;
       document.getElementById('stat-gaps').textContent = schedule.gaps.length;
-      const chip = document.getElementById('status-chip');
-      chip.innerHTML = `<span class="mr-2 inline-block h-2 w-2 rounded-full bg-emerald-500"></span>${esc(schedule.status)}`;
+      document.getElementById('status-chip').textContent = schedule.status;
+      const badge = document.getElementById('data-source-badge');
+      const source = schedule.data_source;
+      badge.textContent = source === 'solver' ? 'Real solver' : source === 'upload' ? 'Uploaded data' : 'Mock data';
+      badge.className = `rounded-full border px-4 py-2 text-sm font-bold ${source !== 'mock' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-100 text-gray-600'}`;
+      const warnings = schedule.warnings || [];
+      const warningPanel = document.getElementById('warnings-panel');
+      warningPanel.classList.toggle('hidden', warnings.length === 0);
+      document.getElementById('warnings-title').textContent = `Warnings (${warnings.length})`;
+      document.getElementById('warnings-list').innerHTML = warnings.map(item => `<li>${esc(item)}</li>`).join('');
     }
     function cellSignatures(schedule) {
-      const signatures = new Map();
-      for (const day of DAYS) for (const shift of SHIFTS) signatures.set(`${day}-${shift}`, []);
-      schedule.assignments.forEach(item => signatures.get(`${item.day}-${item.shift}`)?.push(`a:${item.employee_id}:${item.role}:${item.start}:${item.end}`));
-      schedule.gaps.forEach(item => signatures.get(`${item.day}-${item.shift}`)?.push(`g:${item.gap_id}:${item.needed}:${item.assigned}:${item.short_by}`));
+      const signatures = new Map((schedule.windows || []).map(window => [window.key, []]));
+      schedule.assignments.forEach(item => signatures.get(item.window_key)?.push(`a:${item.employee_id}:${item.task}:${item.start}:${item.end}`));
+      schedule.gaps.forEach(item => signatures.get(item.window_key)?.push(`g:${item.gap_id}:${item.needed}:${item.assigned}:${item.short_by}`));
       for (const values of signatures.values()) values.sort();
       return signatures;
     }
-    function renderGrid(schedule, changedCells = new Set()) {
-      const grid = document.getElementById('schedule-grid');
-      const slots = new Map();
-      for (const day of DAYS) for (const shift of SHIFTS) slots.set(`${day}-${shift}`, { assignments: [], gaps: [] });
-      schedule.assignments.forEach(item => slots.get(`${item.day}-${item.shift}`)?.assignments.push(item));
-      schedule.gaps.forEach(item => slots.get(`${item.day}-${item.shift}`)?.gaps.push(item));
-      let html = '<div></div>' + DAYS.map(day => `<div class="pb-2 text-center text-sm font-extrabold uppercase tracking-wide text-[#766d69]">${day}</div>`).join('');
-      for (const shift of SHIFTS) {
-        html += `<div class="flex items-start pt-3 text-sm font-extrabold capitalize text-[#5C0000]">${shift}</div>`;
-        for (const day of DAYS) {
-          const slot = slots.get(`${day}-${shift}`);
-          const isGap = slot.gaps.length > 0;
-          const chips = slot.assignments.map(item => `<button class="employee-chip role-${esc(item.role)}" data-employee-id="${esc(item.employee_id)}"><i class="role-dot"></i><span class="min-w-0 flex-1 truncate text-sm font-bold text-[#342d2a]">${esc(item.name)}</span><span class="role-pill rounded-md px-2 py-1 text-[11px] font-bold capitalize">${esc(item.role)}</span></button>`).join('');
-          const gaps = slot.gaps.map(gap => `<div class="rounded-xl border border-dashed border-[#ff6b50] bg-white px-3 py-2"><div class="flex items-center gap-2 text-sm font-extrabold text-[#c12b0d]"><span class="text-base">＋</span>Need ${gap.short_by} ${esc(gap.role)}</div><p class="mt-1 pl-6 text-xs font-semibold text-[#9b5b4e]">${gap.assigned}/${gap.needed} filled</p></div>`).join('');
-          const gapHooks = slot.gaps.map(gap => `data-gap-cell-id="${esc(gap.gap_id)}"`).join(' ');
-          const coordinate = `${day}-${shift}`;
-          const flash = changedCells.has(coordinate) ? 'schedule-updated' : '';
-          html += `<div class="schedule-cell ${flash} flex flex-col gap-2 rounded-xl border ${isGap ? 'gap-cell' : 'border-[#eee9e7] bg-[#faf9f8]'} p-2" data-schedule-cell="${coordinate}" ${gapHooks}>${chips}${gaps}</div>`;
-        }
-      }
-      grid.innerHTML = html;
-      grid.querySelectorAll('[data-employee-id]').forEach(button => button.addEventListener('click', () => openDrawer(button.dataset.employeeId)));
-      grid.querySelectorAll('[data-gap-cell-id]').forEach(cell => {
-        cell.addEventListener('mouseenter', () => highlightGap(cell.dataset.gapCellId, true));
-        cell.addEventListener('mouseleave', () => highlightGap(cell.dataset.gapCellId, false));
-        cell.addEventListener('click', event => {
-          if (event.target.closest('[data-employee-id]')) return;
-          document.querySelector(`[data-gap-card="${CSS.escape(cell.dataset.gapCellId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        });
-      });
-    }
     function gapTitle(gap) {
       if (!gap) return 'Schedule gap';
-      return `${gap.day} ${gap.shift}: short ${gap.short_by} ${gap.role}`;
+      return `${gap.day} ${gap.window}: short ${gap.short_by} ${gap.task}`;
+    }
+    function renderGrid(schedule, changedCells = new Set()) {
+      const grid = document.getElementById('schedule-grid');
+      grid.classList.add('schedule-grid');
+      if (['no_solution', 'invalid_input'].includes(schedule.status)) {
+        const message = schedule.status === 'no_solution'
+          ? 'The solver could not find a feasible schedule.'
+          : `The schedule input is invalid. ${(schedule.warnings || []).join(' ')}`;
+        grid.innerHTML = `<div class="col-span-full rounded-xl border border-red-200 bg-red-50 p-6 text-base font-semibold text-red-800">${esc(message)}</div>`;
+        renderExamples(schedule);
+        return;
+      }
+      const cards = DAYS.map(day => {
+        const windows = schedule.windows.filter(window => window.day === day);
+        const windowCards = windows.map(window => {
+          const assignments = schedule.assignments.filter(item => item.window_key === window.key);
+          const gaps = schedule.gaps.filter(item => item.window_key === window.key);
+          const flashed = changedCells.has(window.key) ? 'schedule-updated' : '';
+          const employees = assignments.map(item => `<button type="button" class="employee-chip" style="${taskStyle(item.task)}" data-employee-id="${esc(item.employee_id)}"><i class="task-dot"></i><span class="min-w-0 flex-1 truncate text-sm font-bold text-[#342d2a]">${esc(item.name)}</span><span class="task-pill rounded-md px-2 py-1 text-[11px] font-bold">${esc(item.task)}</span></button>`).join('');
+          const gapChips = gaps.map(gap => `<button type="button" class="gap-cell w-full rounded-xl border border-dashed border-[#ff6b50] bg-white px-3 py-2 text-left" data-gap-cell-id="${esc(gap.gap_id)}"><span class="flex items-center gap-2 text-sm font-extrabold text-[#c12b0d]">＋ Need ${gap.short_by} ${esc(gap.task)}</span><span class="mt-1 block pl-6 text-xs font-semibold text-[#9b5b4e]">${gap.assigned}/${gap.needed} filled</span></button>`).join('');
+          return `<article class="window-card ${flashed} flex flex-col gap-2 rounded-xl border ${gaps.length ? 'gap-cell' : 'border-[#eee9e7] bg-[#faf9f8]'} p-2" data-window-card="${esc(window.key)}"><div class="px-1 pb-1"><h4 class="truncate text-sm font-extrabold text-[#5C0000]" title="${esc(window.name)}">${esc(window.name)}</h4><p class="mt-0.5 text-xs font-semibold text-[#8c817c]">${esc(window.start)}–${esc(window.end)}</p></div>${employees}${gapChips}</article>`;
+        }).join('');
+        return `<section class="min-w-0"><h3 class="mb-2 text-center text-sm font-extrabold uppercase tracking-wide text-[#766d69]">${day}</h3><div class="flex flex-col gap-2">${windowCards || '<p class="rounded-lg bg-[#f7f5f4] px-2 py-4 text-center text-xs font-semibold text-[#918782]">No rush windows</p>'}</div></section>`;
+      }).join('');
+      grid.innerHTML = cards;
+      grid.querySelectorAll('[data-employee-id]').forEach(button => button.addEventListener('click', () => openDrawer(button.dataset.employeeId)));
+      grid.querySelectorAll('[data-gap-cell-id]').forEach(chip => {
+        chip.addEventListener('mouseenter', () => highlightGap(chip.dataset.gapCellId, true));
+        chip.addEventListener('mouseleave', () => highlightGap(chip.dataset.gapCellId, false));
+        chip.addEventListener('click', () => document.querySelector(`[data-gap-card="${CSS.escape(chip.dataset.gapCellId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+      });
+      renderExamples(schedule);
     }
     function highlightGap(gapId, active) {
       document.querySelectorAll(`[data-gap-card="${CSS.escape(gapId)}"], [data-gap-cell-id="${CSS.escape(gapId)}"]`).forEach(el => el.classList.toggle('is-highlighted', active));
@@ -192,8 +233,7 @@
         </article>`;
       }).join('');
       container.innerHTML = `<section class="rounded-xl border border-[#eee9e7] bg-[#f8f7f6] p-4"><div class="mb-2 flex items-center justify-between gap-2"><p class="text-xs font-extrabold uppercase tracking-wider text-[#766d69]">Summary</p><button id="copy-summary" type="button" class="rounded-lg border border-[#ded7d3] bg-white px-3 py-1.5 text-xs font-bold text-[#5C0000] hover:border-[#FF3008]">Copy summary</button></div><p class="text-base leading-relaxed text-[#342d2a]">${summary}</p><p id="copy-confirmation" class="mt-2 hidden text-xs font-bold text-emerald-700">Copied</p></section>${cards || '<p class="rounded-xl bg-[#f8f7f6] p-4 text-sm text-[#766d69]">All issue cards are dismissed.</p>'}`;
-      const copyButton = document.getElementById('copy-summary');
-      copyButton?.addEventListener('click', async () => {
+      document.getElementById('copy-summary')?.addEventListener('click', async () => {
         const text = [explanation.summary || '', ...items.flatMap(item => {
           const gap = schedule.gaps.find(entry => entry.gap_id === item.gap_id);
           return [gapTitle(gap), `Suggested action: ${item.suggested_action || ''}`];
@@ -231,12 +271,8 @@
       const explanation = pageData?.explanation.gap_explanations.find(item => item.gap_id === gapId);
       const suggestion = (explanation?.suggested_action || '').toLowerCase();
       const namedEmployee = pageData?.employees.find(person => suggestion.includes(person.name.toLowerCase()));
-      if (gap && namedEmployee) {
-        sendUpdate(`${namedEmployee.name} will cover ${gap.day} ${gap.shift} ${gap.role}`);
-      } else {
-        showToast('Pick someone to cover this gap');
-        document.getElementById('update-input').focus();
-      }
+      if (gap && namedEmployee) sendUpdate(`${namedEmployee.name} will cover ${gap.day} ${gap.window} ${gap.task}`);
+      else { showToast('Pick someone to cover this gap'); document.getElementById('update-input').focus(); }
     }
     function renderChat() {
       const container = document.getElementById('chat-messages');
@@ -252,180 +288,204 @@
     }
     function understoodAs(parsed) {
       if (!parsed || !['callout', 'cover'].includes(parsed.type) || !parsed.employee) return '';
-      const dayShift = [parsed.day, parsed.shift].filter(Boolean).join(' ');
-      const details = [dayShift, parsed.role].filter(Boolean).join(' ');
-      return parsed.type === 'callout'
-        ? `${parsed.employee} called out${details ? `, ${details}` : ''}`
-        : `${parsed.employee} will cover${details ? ` ${details}` : ''}`;
+      const details = [parsed.day, parsed.shift, parsed.role].filter(Boolean).join(' ');
+      return parsed.type === 'callout' ? `${parsed.employee} called out${details ? `, ${details}` : ''}` : `${parsed.employee} will cover${details ? ` ${details}` : ''}`;
     }
     async function refreshAiMode() {
       const badge = document.getElementById('ai-mode-badge');
       try {
-        const response = await fetch('/api/health');
-        if (!response.ok) throw new Error('health check failed');
+        const response = await fetch('/api/health'); if (!response.ok) throw new Error('health check failed');
         const health = await response.json();
-        if (health.ai_available) {
-          badge.textContent = 'AI mode';
-          badge.className = 'rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700';
-        } else {
-          badge.textContent = 'Offline mode (keyword)';
-          badge.className = 'rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600';
-        }
-      } catch (error) {
-        badge.textContent = 'Offline mode (keyword)';
-        badge.className = 'rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600';
-      }
+        if (health.ai_available) { badge.textContent = 'AI mode'; badge.className = 'rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700'; }
+        else { badge.textContent = 'Offline mode (keyword)'; badge.className = 'rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600'; }
+      } catch (error) { badge.textContent = 'Offline mode (keyword)'; badge.className = 'rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600'; }
     }
     function setTyping(isTyping) {
       const container = document.getElementById('chat-messages');
       let indicator = document.getElementById('typing-indicator');
-      if (isTyping && !indicator) {
-        indicator = document.createElement('div'); indicator.id = 'typing-indicator'; indicator.className = 'flex justify-start';
-        indicator.innerHTML = '<div class="rounded-2xl rounded-bl-md bg-[#f2efed] px-3.5 py-2 text-sm font-semibold text-[#766d69]">BonApp is updating<span class="inline-block w-5 animate-pulse">…</span></div>';
-        container.appendChild(indicator);
-      } else if (!isTyping && indicator) indicator.remove();
+      if (isTyping && !indicator) { indicator = document.createElement('div'); indicator.id = 'typing-indicator'; indicator.className = 'flex justify-start'; indicator.innerHTML = '<div class="rounded-2xl rounded-bl-md bg-[#f2efed] px-3.5 py-2 text-sm font-semibold text-[#766d69]">BonApp is updating<span class="inline-block w-5 animate-pulse">…</span></div>'; container.appendChild(indicator); }
+      else if (!isTyping && indicator) indicator.remove();
       container.scrollTop = container.scrollHeight;
     }
     async function refreshFromData(data, flash = false) {
       const before = pageData?.schedule ? cellSignatures(pageData.schedule) : null;
       pageData = data;
       const changed = new Set();
-      if (flash && before) {
-        const after = cellSignatures(data.schedule);
-        for (const [cell, values] of after) if (JSON.stringify(values) !== JSON.stringify(before.get(cell))) changed.add(cell);
+      if (flash && before) { const after = cellSignatures(data.schedule); for (const [cell, values] of after) if (JSON.stringify(values) !== JSON.stringify(before.get(cell))) changed.add(cell); }
+      renderStats(data.schedule); renderLegend(); renderGrid(data.schedule, changed); renderInsights(data.explanation, data.schedule);
+    }
+    function renderExamples(schedule) {
+      const root = document.getElementById('example-chips');
+      if (!root) return;
+      const assignments = schedule.assignments || [];
+      const gaps = schedule.gaps || [];
+      const employees = pageData?.employees || [];
+      const examples = [];
+      if (assignments.length) {
+        const callout = assignments[0];
+        examples.push(`${callout.name} called out ${callout.day} ${callout.window}`);
       }
-      renderStats(data.schedule);
-      renderGrid(data.schedule, changed);
-      renderInsights(data.explanation, data.schedule);
+      if (gaps.length) {
+        const gap = gaps[0];
+        const candidate = employees.find(person => person.tasks.includes(gap.task) && !assignments.some(item => item.employee_id === person.employee_id && item.window_key === gap.window_key));
+        if (candidate) examples.push(`${candidate.name} will cover ${gap.day} ${gap.window} ${gap.task}`);
+      }
+      const question = assignments[0];
+      if (question) examples.push(`Who is working ${question.day} ${question.window}?`);
+      root.innerHTML = examples.map(message => `<button type="button" class="example-chip rounded-full border border-[#f2c5bb] bg-[#fff7f5] px-3 py-1.5 text-xs font-bold text-[#8f260e]">${esc(message)}</button>`).join('');
+      root.querySelectorAll('.example-chip').forEach(button => button.addEventListener('click', () => sendUpdate(button.textContent)));
     }
     async function sendUpdate(message) {
-      const value = message.trim();
-      if (!value) return;
-      if (pendingApprovalId) {
-        chatMessages.push({ role: 'assistant', text: 'Please approve or reject the pending change before sending another update.' });
-        renderChat(); return;
-      }
-      chatMessages.push({ role: 'user', text: value });
-      renderChat();
+      const value = message.trim(); if (!value) return;
+      if (pendingApprovalId) { chatMessages.push({ role: 'assistant', text: 'Please approve or reject the pending change before sending another update.' }); renderChat(); return; }
+      chatMessages.push({ role: 'user', text: value }); renderChat();
       document.getElementById('update-input').value = '';
-      document.getElementById('send-update').disabled = true;
-      setTyping(true);
+      document.getElementById('send-update').disabled = true; setTyping(true);
       try {
         const response = await fetch('/api/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: value }) });
         if (!response.ok) throw new Error(`Request failed (${response.status})`);
         const result = await response.json();
         chatMessages.push({ role: 'assistant', text: result.reply, understood: understoodAs(result.parsed), source: result.source });
         if (result.needs_manager_approval && result.change?.id) {
-          pendingApprovalId = result.change.id;
-          document.getElementById('approval-reason').textContent = result.reason || '';
-          document.getElementById('approval-banner').classList.remove('hidden');
+          pendingApprovalId = result.change.id; document.getElementById('approval-reason').textContent = result.reason || ''; document.getElementById('approval-banner').classList.remove('hidden');
         } else if (result.change) {
           document.getElementById('approval-banner').classList.add('hidden');
-          await refreshFromData({ schedule: result.schedule, explanation: result.explanation, employees: pageData.employees }, true);
+          await refreshFromData({ schedule: result.schedule, explanation: result.explanation, employees: result.employees }, true);
         }
-      } catch (error) {
-        chatMessages.push({ role: 'assistant', text: `Sorry, BonApp couldn't process that update right now. Please try again. (${error.message})` });
-      } finally {
-        setTyping(false); renderChat(); document.getElementById('send-update').disabled = false;
-      }
+      } catch (error) { chatMessages.push({ role: 'assistant', text: `Sorry, BonApp couldn't process that update right now. Please try again. (${error.message})` }); }
+      finally { setTyping(false); renderChat(); document.getElementById('send-update').disabled = false; }
     }
     async function resolveApproval(approve) {
       if (!pendingApprovalId) return;
-      document.getElementById('approve-change').disabled = true;
-      document.getElementById('reject-change').disabled = true;
+      document.getElementById('approve-change').disabled = true; document.getElementById('reject-change').disabled = true;
       try {
         const response = await fetch('/api/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ change_id: pendingApprovalId, approve }) });
         if (!response.ok) throw new Error(`Request failed (${response.status})`);
-        const result = await response.json();
-        pendingApprovalId = null;
-        document.getElementById('approval-banner').classList.add('hidden');
+        const result = await response.json(); pendingApprovalId = null; document.getElementById('approval-banner').classList.add('hidden');
         chatMessages.push({ role: 'assistant', text: result.reply });
-        await refreshFromData({ schedule: result.schedule, explanation: result.explanation, employees: pageData.employees }, approve && Boolean(result.change));
-      } catch (error) {
-        chatMessages.push({ role: 'assistant', text: `I couldn't resolve that approval. ${error.message}` });
-      } finally {
-        document.getElementById('approve-change').disabled = false;
-        document.getElementById('reject-change').disabled = false;
-        renderChat();
-      }
+        await refreshFromData({ schedule: result.schedule, explanation: result.explanation, employees: result.employees }, approve && Boolean(result.change));
+      } catch (error) { chatMessages.push({ role: 'assistant', text: `I couldn't resolve that approval. ${error.message}` }); }
+      finally { document.getElementById('approve-change').disabled = false; document.getElementById('reject-change').disabled = false; renderChat(); }
     }
     async function resetDemo() {
       try {
-        const response = await fetch('/api/reset', { method: 'POST' });
-        if (!response.ok) throw new Error(`Request failed (${response.status})`);
-        const data = await response.json();
-        pendingApprovalId = null;
-        document.getElementById('approval-banner').classList.add('hidden');
-        chatMessages = [{ role: 'assistant', text: 'Demo schedule reset to its original state.' }];
-        await refreshFromData(data, true);
-        renderChat();
-      } catch (error) {
-        showToast(`Could not reset demo: ${error.message}`);
-      }
+        const response = await fetch('/api/reset', { method: 'POST' }); if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        const data = await response.json(); pendingApprovalId = null; document.getElementById('approval-banner').classList.add('hidden');
+        generatedThisSession = true; chatMessages = [{ role: 'assistant', text: 'Demo schedule reset to its original state.' }];
+        showScheduleView(); await refreshFromData(data, true); renderChat();
+      } catch (error) { showToast(`Could not reset demo: ${error.message}`); }
     }
     function openDrawer(employeeId) {
-      const employee = pageData.employees.find(person => person.employee_id === employeeId);
-      if (!employee) return;
+      const employee = pageData.employees.find(person => person.employee_id === employeeId); if (!employee) return;
       const shifts = pageData.schedule.assignments.filter(item => item.employee_id === employeeId);
-      const hours = shifts.reduce((total, item) => total + item.hours, 0);
-      const percent = employee.max_weekly_hours ? Math.min(hours / employee.max_weekly_hours * 100, 100) : 0;
+      const hours = employee.hours_scheduled || shifts.reduce((total, item) => total + item.hours, 0);
+      const maxHours = employee.max_hours; const percent = maxHours ? Math.min(hours / maxHours * 100, 100) : 0;
       document.getElementById('drawer-name').textContent = employee.name;
+      const taskRows = employee.tasks.map(task => `<div style="${taskStyle(task)}" class="flex items-center justify-between rounded-xl bg-[#f7f5f4] p-3"><span class="flex items-center gap-2 font-semibold"><i class="task-dot"></i>${esc(task)}</span><span class="font-extrabold">${money(employee.rates[task])}<span class="text-xs font-semibold text-[#766d69]"> / hr</span></span></div>`).join('');
       document.getElementById('drawer-content').innerHTML = `
-        <section><h3 class="mb-3 text-sm font-bold uppercase tracking-wider text-[#918782]">Roles</h3><div class="flex flex-wrap gap-2">${employee.roles.map(role => `<span class="role-${esc(role)} role-pill rounded-full px-3 py-1.5 text-sm font-bold capitalize">${esc(role)}</span>`).join('')}</div></section>
-        <section class="grid grid-cols-2 gap-3"><div class="rounded-xl bg-[#f7f5f4] p-4"><p class="text-xs font-bold uppercase tracking-wide text-[#918782]">Hourly wage</p><p class="mt-2 text-xl font-extrabold">${money(employee.hourly_wage)}<span class="text-sm font-semibold text-[#766d69]"> / hr</span></p></div><div class="rounded-xl bg-[#f7f5f4] p-4"><p class="text-xs font-bold uppercase tracking-wide text-[#918782]">Weekly hours</p><p class="mt-2 text-xl font-extrabold">${hours}<span class="text-sm font-semibold text-[#766d69]"> / ${employee.max_weekly_hours} hr</span></p></div></section>
-        <section><div class="mb-2 flex justify-between text-sm"><h3 class="font-bold">Weekly hour limit</h3><span class="font-bold text-[#766d69]">${Math.round(hours / employee.max_weekly_hours * 100)}%</span></div><div class="progress-track"><div class="progress-fill ${hours / employee.max_weekly_hours > .9 ? 'over90' : ''}" style="width:${percent}%"></div></div></section>
-        <section><div class="mb-3 flex items-center justify-between"><h3 class="text-lg font-extrabold">Scheduled shifts</h3><span class="rounded-full bg-[#f4f1ef] px-3 py-1 text-xs font-bold text-[#766d69]">${shifts.length} shifts</span></div><div class="space-y-2">${shifts.length ? shifts.map(item => `<div class="flex items-center justify-between gap-3 rounded-xl border border-[#eee9e7] p-3"><div><p class="font-bold">${esc(item.day)} <span class="capitalize">${esc(item.shift)}</span></p><p class="mt-1 text-sm capitalize text-[#766d69]">${esc(item.role)} · ${esc(item.start)}–${esc(item.end)}</p></div><span class="text-sm font-bold text-[#5C0000]">${item.hours} hr</span></div>`).join('') : '<p class="rounded-xl bg-[#f7f5f4] p-4 text-sm text-[#766d69]">No shifts scheduled.</p>'}</div></section>`;
+        <section><h3 class="mb-3 text-sm font-bold uppercase tracking-wider text-[#918782]">Tasks & rates</h3><div class="space-y-2">${taskRows || '<p class="text-sm text-[#766d69]">No eligible tasks.</p>'}</div></section>
+        <section><div class="mb-2 flex items-end justify-between"><div><h3 class="text-sm font-bold uppercase tracking-wider text-[#918782]">Hours scheduled</h3><p class="mt-1 text-xl font-extrabold">${hours} / ${maxHours ?? '—'} hr</p>${employee.min_hours != null ? `<p class="mt-1 text-sm text-[#766d69]">Minimum: ${employee.min_hours} hr</p>` : ''}</div><span class="text-sm font-bold text-[#766d69]">${maxHours ? Math.round(hours / maxHours * 100) : 0}%</span></div><div class="progress-track"><div class="progress-fill ${maxHours && hours / maxHours > .9 ? 'over90' : ''}" style="width:${percent}%"></div></div></section>
+        <section><div class="mb-3 flex items-center justify-between"><h3 class="text-lg font-extrabold">Scheduled windows</h3><span class="rounded-full bg-[#f4f1ef] px-3 py-1 text-xs font-bold text-[#766d69]">${shifts.length} shifts</span></div><div class="space-y-2">${shifts.length ? shifts.map(item => `<div class="flex items-center justify-between gap-3 rounded-xl border border-[#eee9e7] p-3"><div><p class="font-bold">${esc(item.day)} ${esc(item.window)}</p><p class="mt-1 text-sm text-[#766d69]">${esc(item.task)} · ${esc(item.start)}–${esc(item.end)}</p></div><span class="text-sm font-bold text-[#5C0000]">${item.hours} hr</span></div>`).join('') : '<p class="rounded-xl bg-[#f7f5f4] p-4 text-sm text-[#766d69]">No windows scheduled.</p>'}</div></section>`;
       setDrawer(true);
     }
     function setDrawer(open) {
-      const drawer = document.getElementById('employee-drawer');
-      const backdrop = document.getElementById('drawer-backdrop');
+      const drawer = document.getElementById('employee-drawer'); const backdrop = document.getElementById('drawer-backdrop');
       drawer.classList.toggle('open', open); backdrop.classList.toggle('open', open);
-      drawer.setAttribute('aria-hidden', String(!open)); backdrop.setAttribute('aria-hidden', String(!open));
-      document.body.style.overflow = open ? 'hidden' : '';
+      drawer.setAttribute('aria-hidden', String(!open)); backdrop.setAttribute('aria-hidden', String(!open)); document.body.style.overflow = open ? 'hidden' : '';
     }
     function validateSchedulePayload(data) {
-      const schedule = data?.schedule;
-      const explanation = data?.explanation;
-      const missing = [];
+      const schedule = data?.schedule; const explanation = data?.explanation; const missing = [];
       if (!schedule || !Array.isArray(schedule.assignments)) missing.push('schedule.assignments');
       if (!schedule || !Array.isArray(schedule.gaps)) missing.push('schedule.gaps');
-      if (!schedule || !Number.isFinite(Number(schedule.total_cost))) missing.push('schedule.total_cost');
+      if (!schedule || !Array.isArray(schedule.windows)) missing.push('schedule.windows');
+      if (!schedule || !Array.isArray(schedule.tasks)) missing.push('schedule.tasks');
+      if (!schedule || !Array.isArray(schedule.demand)) missing.push('schedule.demand');
+      if (!schedule || !Number.isFinite(Number(schedule.labor_cost))) missing.push('schedule.labor_cost');
       if (!schedule || !Number.isFinite(Number(schedule.coverage_rate))) missing.push('schedule.coverage_rate');
       if (!schedule || typeof schedule.status !== 'string') missing.push('schedule.status');
       if (!explanation || !Array.isArray(explanation.gap_explanations)) missing.push('explanation.gap_explanations');
       if (!Array.isArray(data?.employees)) missing.push('employees');
       if (missing.length) throw new Error(`API response missing required fields: ${missing.join(', ')}`);
     }
-    async function init() {
-      const status = document.getElementById('status-chip');
-      const loadError = document.getElementById('load-error');
+    function showDataInView() {
+      document.getElementById('data-in-view').classList.remove('hidden');
+      document.getElementById('schedule-view').classList.add('hidden');
+      document.getElementById('update-bar').classList.add('hidden');
+      document.getElementById('back-to-schedule').classList.toggle('hidden', !generatedThisSession);
+    }
+    function showScheduleView() {
+      document.getElementById('data-in-view').classList.add('hidden');
+      document.getElementById('schedule-view').classList.remove('hidden');
+      document.getElementById('update-bar').classList.remove('hidden');
+    }
+    function showUploadError(message, errors = null) {
+      const box = document.getElementById('upload-error');
+      const lines = errors?.length ? `<ul class="mt-2 list-disc space-y-1 pl-5">${errors.map(error => `<li>${esc(error)}</li>`).join('')}</ul>` : `<p class="mt-2">${esc(message || 'Please check the workbook and try again.')}</p>`;
+      box.innerHTML = `<p class="text-lg font-extrabold">${errors?.length ? 'Please fix these workbook issues' : 'Upload could not be completed'}</p>${lines}${errors?.length ? '<p class="mt-3 font-semibold">Fix the file and try again.</p>' : ''}`;
+      box.classList.remove('hidden');
+    }
+    function setSelectedFile(file) {
+      const error = document.getElementById('upload-error');
+      error.classList.add('hidden'); error.textContent = '';
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.xlsx')) { selectedWorkbook = null; showUploadError('Only .xlsx workbooks are accepted.'); }
+      else if (file.size > 5 * 1024 * 1024) { selectedWorkbook = null; showUploadError('The workbook must be 5 MB or smaller.'); }
+      else selectedWorkbook = file;
+      const chosen = document.getElementById('selected-file');
+      if (selectedWorkbook) {
+        const size = selectedWorkbook.size < 1024 * 1024 ? `${(selectedWorkbook.size / 1024).toFixed(1)} KB` : `${(selectedWorkbook.size / (1024 * 1024)).toFixed(2)} MB`;
+        chosen.textContent = `${selectedWorkbook.name} · ${size}`; chosen.classList.remove('hidden');
+      } else { chosen.textContent = ''; chosen.classList.add('hidden'); }
+      document.getElementById('generate-schedule').disabled = !selectedWorkbook;
+    }
+    async function generateSchedule() {
+      if (!selectedWorkbook) return;
+      const loading = document.getElementById('upload-loading'); const errorBox = document.getElementById('upload-error');
+      const generate = document.getElementById('generate-schedule');
+      errorBox.classList.add('hidden'); loading.classList.remove('hidden'); generate.disabled = true;
+      let step = 0;
+      const steps = [...document.querySelectorAll('#upload-steps [data-step]')];
+      const paintStep = () => steps.forEach((item, index) => { item.className = index < step ? 'text-emerald-700' : index === step ? 'font-extrabold text-[#FF3008]' : 'text-[#8d807b]'; });
+      paintStep();
+      const timer = setInterval(() => { step = Math.min(step + 1, steps.length - 1); paintStep(); }, 650);
       try {
-        renderLegend();
-        refreshAiMode();
-        const response = await fetch('/api/schedule');
-        if (!response.ok) throw new Error(`GET /api/schedule failed (${response.status} ${response.statusText})`);
-        const data = await response.json();
-        validateSchedulePayload(data);
-        pageData = data;
-        renderStats(pageData.schedule);
-        renderGrid(pageData.schedule);
-        renderInsights(pageData.explanation, pageData.schedule);
-        loadError.textContent = '';
-        loadError.classList.add('hidden');
+        const form = new FormData(); form.append('file', selectedWorkbook);
+        const response = await fetch('/api/upload', { method: 'POST', body: form });
+        const result = await response.json();
+        if (response.status === 422) { showUploadError('', result.errors || []); return; }
+        if (!response.ok || !result.ok) throw new Error(result.error || `Upload failed (${response.status})`);
+        clearInterval(timer); step = steps.length; paintStep();
+        validateSchedulePayload(result);
+        generatedThisSession = true; pendingApprovalId = null;
+        document.getElementById('approval-banner').classList.add('hidden');
+        showScheduleView();
+        await refreshFromData(result, false);
+        showToast(`Schedule generated in ${Number(result.solve_seconds || 0).toFixed(1)}s`);
       } catch (error) {
-        console.error('Schedule load failed:', error);
-        status.textContent = 'Schedule unavailable';
-        status.className = 'rounded-full border border-red-300 bg-red-50 px-4 py-2 text-sm font-bold text-red-800';
-        loadError.textContent = `Could not load schedule: ${error?.message || String(error)}`;
-        loadError.classList.remove('hidden');
+        showUploadError(error.message);
+      } finally {
+        clearInterval(timer); loading.classList.add('hidden'); generate.disabled = !selectedWorkbook;
       }
     }
+    async function init() {
+      refreshAiMode();
+      showDataInView();
+    }
     document.getElementById('update-form').addEventListener('submit', event => { event.preventDefault(); sendUpdate(document.getElementById('update-input').value); });
-    document.querySelectorAll('.example-chip').forEach(button => button.addEventListener('click', () => { document.getElementById('update-input').value = button.textContent; sendUpdate(button.textContent); }));
     document.getElementById('approve-change').addEventListener('click', () => resolveApproval(true));
     document.getElementById('reject-change').addEventListener('click', () => resolveApproval(false));
     document.getElementById('reset-demo').addEventListener('click', resetDemo);
+    document.getElementById('show-data-in').addEventListener('click', showDataInView);
+    document.getElementById('back-to-schedule').addEventListener('click', showScheduleView);
+    document.getElementById('choose-file').addEventListener('click', () => document.getElementById('workbook-file').click());
+    document.getElementById('workbook-file').addEventListener('change', event => setSelectedFile(event.target.files[0]));
+    document.getElementById('generate-schedule').addEventListener('click', generateSchedule);
+    document.getElementById('use-demo').addEventListener('click', resetDemo);
+    const dropZone = document.getElementById('drop-zone');
+    dropZone.addEventListener('click', event => { if (event.target.id !== 'choose-file') document.getElementById('workbook-file').click(); });
+    dropZone.addEventListener('dragover', event => { event.preventDefault(); dropZone.classList.add('border-[#FF3008]', 'bg-[#fff4f0]'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-[#FF3008]', 'bg-[#fff4f0]'));
+    dropZone.addEventListener('drop', event => { event.preventDefault(); dropZone.classList.remove('border-[#FF3008]', 'bg-[#fff4f0]'); setSelectedFile(event.dataTransfer.files[0]); });
     document.getElementById('drawer-close').addEventListener('click', () => setDrawer(false));
     document.getElementById('drawer-backdrop').addEventListener('click', () => setDrawer(false));
     document.addEventListener('keydown', event => { if (event.key === 'Escape') setDrawer(false); });

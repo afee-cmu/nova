@@ -1,44 +1,30 @@
 """FastAPI backend for the BonApp scheduling UI."""
 
 import os
+import logging
+import tempfile
 import uuid
 from copy import deepcopy
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .adapters import explain
 from .llm import parse_message
-from .mock_data import EMPLOYEES, SCHEDULE
+from .mock_data import EMPLOYEES as MOCK_EMPLOYEES, SCHEDULE as MOCK_SCHEDULE
+from .solver_bridge import (TEMPLATE_PATH, WorkbookValidationError, build_explanation,
+                            initialize_demo, normalize_mock, solve_workbook)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-SHIFT_TIMES = {"lunch": ("11:00", "16:00"), "dinner": ("17:00", "22:00")}
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="BonApp UI")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-_ORIGINAL_SCHEDULE = deepcopy(SCHEDULE)
-_ORIGINAL_EXPLANATION = deepcopy(explain(_ORIGINAL_SCHEDULE))
-_ORIGINAL_EMPLOYEES = deepcopy(EMPLOYEES)
-_DEMAND = {}
-_GAP_IDS = {}
-for assignment in _ORIGINAL_SCHEDULE["assignments"]:
-    key = (assignment["day"], assignment["shift"], assignment["role"])
-    _DEMAND[key] = _DEMAND.get(key, 0) + 1
-for gap in _ORIGINAL_SCHEDULE["gaps"]:
-    key = (gap["day"], gap["shift"], gap["role"])
-    _DEMAND[key] = max(_DEMAND.get(key, 0), gap["needed"])
-    _GAP_IDS[key] = gap["gap_id"]
-
-current_schedule = deepcopy(_ORIGINAL_SCHEDULE)
-current_explanation = deepcopy(_ORIGINAL_EXPLANATION)
-current_employees = deepcopy(_ORIGINAL_EMPLOYEES)
-pending_changes = {}
 
 
 class UpdateRequest(BaseModel):
@@ -50,35 +36,88 @@ class ApprovalRequest(BaseModel):
     approve: bool
 
 
-def _employee_by_id(employee_id):
-    return next(person for person in current_employees if person["employee_id"] == employee_id)
+current_schedule = normalize_mock()
+current_explanation = build_explanation(current_schedule)
+current_employees = deepcopy(current_schedule["employees"])
+current_solver_context = None
+pending_changes = {}
+_BOOT_SCHEDULE = deepcopy(current_schedule)
+_BOOT_EXPLANATION = deepcopy(current_explanation)
+_BOOT_EMPLOYEES = deepcopy(current_employees)
+_BOOT_SOLVER_CONTEXT = None
+
+
+@app.on_event("startup")
+def initialize_solver_cache():
+    global current_schedule, current_explanation, current_employees, current_solver_context
+    global _BOOT_SCHEDULE, _BOOT_EXPLANATION, _BOOT_EMPLOYEES, _BOOT_SOLVER_CONTEXT
+    current_schedule, current_explanation, current_employees, current_solver_context, _ = initialize_demo()
+    _BOOT_SCHEDULE = deepcopy(current_schedule)
+    _BOOT_EXPLANATION = deepcopy(current_explanation)
+    _BOOT_EMPLOYEES = deepcopy(current_employees)
+    _BOOT_SOLVER_CONTEXT = deepcopy(current_solver_context)
+    pending_changes.clear()
+
+
+def _response(reply, change=None, approval=False, reason=None, source=None, parsed=None):
+    result = {"reply": reply, "change": change, "needs_manager_approval": approval,
+              "reason": reason, "schedule": deepcopy(current_schedule),
+              "explanation": deepcopy(current_explanation), "employees": deepcopy(current_employees)}
+    if source is not None:
+        result["source"] = source
+    if parsed is not None:
+        result["parsed"] = deepcopy(parsed)
+    return result
+
+
+def _window_matches(day, window_name):
+    return [window for window in current_schedule["windows"]
+            if window["day"] == day and (window_name is None or window["name"].casefold() == window_name.casefold())]
 
 
 def _recompute():
     global current_explanation
     assigned_counts = {}
-    for item in current_schedule["assignments"]:
-        key = (item["day"], item["shift"], item["role"])
+    for assignment in current_schedule["assignments"]:
+        key = (assignment["window_key"], assignment["task"])
         assigned_counts[key] = assigned_counts.get(key, 0) + 1
+    demand = []
     gaps = []
-    for key, needed in _DEMAND.items():
+    windows = {window["key"]: window for window in current_schedule["windows"]}
+    for item in current_schedule["demand"]:
+        key = (item["window_key"], item["task"])
         assigned = assigned_counts.get(key, 0)
-        if assigned < needed:
-            gap_id = _GAP_IDS.setdefault(key, f"g-{key[0].lower()}-{key[1]}-{key[2]}")
-            gaps.append({"gap_id": gap_id, "day": key[0], "shift": key[1], "role": key[2],
-                         "needed": needed, "assigned": assigned, "short_by": needed - assigned})
+        missing = max(0, item["needed"] - assigned)
+        updated = {**item, "assigned": assigned, "missing": missing}
+        demand.append(updated)
+        if missing:
+            window = windows[item["window_key"]]
+            gaps.append({"gap_id": f"{item['window_key']}|{item['task']}",
+                         "window_key": item["window_key"], "day": window["day"],
+                         "window": window["name"], "task": item["task"],
+                         "needed": item["needed"], "assigned": assigned, "short_by": missing})
+    current_schedule["demand"] = demand
     current_schedule["gaps"] = gaps
-    wages = {person["employee_id"]: person["hourly_wage"] for person in current_employees}
-    current_schedule["total_cost"] = round(sum(item["hours"] * wages[item["employee_id"]]
-                                                 for item in current_schedule["assignments"]), 2)
-    needed_slots = sum(_DEMAND.values())
-    current_schedule["coverage_rate"] = (len(current_schedule["assignments"]) / needed_slots) if needed_slots else 1.0
-    current_explanation = explain(current_schedule)
+    current_schedule["labor_cost"] = round(sum(item["cost"] for item in current_schedule["assignments"]), 2)
+    needed = sum(item["needed"] for item in demand)
+    missing = sum(item["missing"] for item in demand)
+    current_schedule["coverage_rate"] = 1 - missing / needed if needed else 1.0
+    hours = {}
+    for item in current_schedule["assignments"]:
+        hours[item["employee_id"]] = hours.get(item["employee_id"], 0) + item["hours"]
+    for employee in current_employees:
+        employee["hours_scheduled"] = hours.get(employee["employee_id"], 0)
+    current_schedule["employees"] = deepcopy(current_employees)
+    current_explanation = build_explanation(current_schedule, current_solver_context)
 
 
 def _clock_minutes(value):
     hour, minute = map(int, value.split(":"))
     return hour * 60 + minute
+
+
+def _hours_for_window(window):
+    return (_clock_minutes(window["end"]) - _clock_minutes(window["start"])) / 60
 
 
 def _turnaround_conflicts(employee_id, candidate):
@@ -90,43 +129,47 @@ def _turnaround_conflicts(employee_id, candidate):
         occurrences.append((day_index * 1440 + _clock_minutes(item["start"]),
                             day_index * 1440 + _clock_minutes(item["end"]), item))
     occurrences.sort(key=lambda value: value[0])
-    conflicts = []
     for index, (_, end, item) in enumerate(occurrences):
         next_start, _, next_item = occurrences[(index + 1) % len(occurrences)]
+        next_day = next_item["day"]
         if index == len(occurrences) - 1:
             next_start += 7 * 1440
-        rest = next_start - end
-        if item["shift"] == "dinner" and next_item["shift"] == "lunch" and rest < 11 * 60:
-            conflicts.append((item, next_item, rest))
-    return conflicts
+        elif next_day == item["day"]:
+            continue
+        if next_start - end < 11 * 60:
+            return item, next_item
+    return None
 
 
-def _find_gap(day, shift, role):
-    return next((gap for gap in current_schedule["gaps"]
-                 if gap["day"] == day and gap["shift"] == shift and gap["role"] == role), None)
+def _overtime_threshold(employee_id):
+    raw_data = (current_solver_context or {}).get("raw_data", {})
+    person = next((entry for entry in raw_data.get("employees", [])
+                   if entry["employee_id"] == employee_id), {})
+    return person.get("overtime_threshold_hours")
 
 
-def _cover_assignment(employee, day, shift, role):
-    start, end = SHIFT_TIMES[shift]
-    return {"employee_id": employee["employee_id"], "name": employee["name"], "day": day,
-            "shift": shift, "role": role, "start": start, "end": end,
-            "hours": (_clock_minutes(end) - _clock_minutes(start)) / 60}
+def _make_cover_assignment(employee, window, task):
+    wage = employee.get("rates", {}).get(task)
+    if wage is None:
+        return None
+    hours = _hours_for_window(window)
+    return {"employee_id": employee["employee_id"], "name": employee["name"],
+            "window_key": window["key"], "day": window["day"], "window": window["name"],
+            "start": window["start"], "end": window["end"], "task": task,
+            "hours": hours, "wage": wage, "cost": round(hours * wage, 2)}
 
 
-def _apply_cover(employee, day, shift, role):
-    current_schedule["assignments"].append(_cover_assignment(employee, day, shift, role))
+def _apply_cover(employee, window, task):
+    assignment = _make_cover_assignment(employee, window, task)
+    if assignment is None:
+        raise ValueError(f"No pay rate is available for {task}.")
+    current_schedule["assignments"].append(assignment)
     _recompute()
 
 
-def _response(reply, change=None, approval=False, reason=None, source=None, parsed=None):
-    result = {"reply": reply, "change": change, "needs_manager_approval": approval,
-              "reason": reason, "schedule": deepcopy(current_schedule),
-              "explanation": deepcopy(current_explanation)}
-    if source is not None:
-        result["source"] = source
-    if parsed is not None:
-        result["parsed"] = deepcopy(parsed)
-    return result
+def _find_gap(window_key, task):
+    return next((gap for gap in current_schedule["gaps"]
+                 if gap["window_key"] == window_key and gap["task"].casefold() == task.casefold()), None)
 
 
 @app.get("/")
@@ -134,10 +177,17 @@ def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/api/template")
+def download_template():
+    return FileResponse(TEMPLATE_PATH, filename="schedule_input_template.xlsx",
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 @app.get("/api/health")
 def health():
     ai_available = bool(os.getenv("api_key"))
-    return {"status": "ok", "mock_mode": not ai_available, "ai_available": ai_available}
+    return {"status": "ok", "mock_mode": current_schedule["data_source"] == "mock",
+            "ai_available": ai_available}
 
 
 @app.get("/api/schedule")
@@ -146,12 +196,70 @@ def schedule():
             "employees": deepcopy(current_employees)}
 
 
+@app.post("/api/upload")
+async def upload_workbook(request: Request):
+    """Validate and solve a canonical .xlsx workbook without touching the repo."""
+    global current_schedule, current_explanation, current_employees, current_solver_context
+    temporary_path = None
+    form = None
+    try:
+        try:
+            form = await request.form()
+        except AssertionError as error:
+            if "python-multipart" in str(error):
+                return JSONResponse(status_code=500, content={"ok": False,
+                    "error": "Workbook uploads require python-multipart. Install the UI dependencies and restart the server."})
+            raise
+        upload_values = [value for _, value in form.multi_items()
+                         if hasattr(value, "filename") and hasattr(value, "read")]
+        if len(upload_values) > 1:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "Upload one .xlsx workbook at a time."})
+        uploaded = form.get("file")
+        if uploaded is None or not hasattr(uploaded, "filename") or not hasattr(uploaded, "read"):
+            return JSONResponse(status_code=400, content={"ok": False, "error": "Choose one .xlsx workbook to upload."})
+        filename = uploaded.filename or ""
+        if Path(filename).suffix.casefold() != ".xlsx":
+            return JSONResponse(status_code=400, content={"ok": False, "error": "Only .xlsx workbooks are accepted."})
+        content = await uploaded.read(MAX_UPLOAD_BYTES + 1)
+        if len(content) > MAX_UPLOAD_BYTES:
+            return JSONResponse(status_code=413, content={"ok": False, "error": "The workbook must be 5 MB or smaller."})
+        with tempfile.NamedTemporaryFile(prefix="bonapp-upload-", suffix=".xlsx", delete=False) as temp_file:
+            temporary_path = Path(temp_file.name)
+            temp_file.write(content)
+        new_schedule, new_explanation, new_employees, inputs, solve_seconds = solve_workbook(temporary_path)
+        new_schedule["data_source"] = "upload"
+        current_schedule = new_schedule
+        current_explanation = new_explanation
+        current_employees = new_employees
+        current_solver_context = inputs
+        pending_changes.clear()
+        return {"ok": True, "schedule": deepcopy(current_schedule),
+                "explanation": deepcopy(current_explanation), "employees": deepcopy(current_employees),
+                "warnings": list(current_schedule.get("warnings", [])), "solve_seconds": solve_seconds}
+    except WorkbookValidationError as error:
+        return JSONResponse(status_code=422, content={"ok": False, "errors": error.errors,
+                            "warnings": error.warnings})
+    except Exception:
+        logger.exception("Unexpected workbook upload failure")
+        return JSONResponse(status_code=500, content={"ok": False,
+                            "error": "The workbook could not be processed. Check the file and try again."})
+    finally:
+        if form is not None and hasattr(form, "close"):
+            await form.close()
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("Could not remove temporary workbook upload")
+
+
 @app.post("/api/reset")
 def reset():
-    global current_schedule, current_explanation, current_employees
-    current_schedule = deepcopy(_ORIGINAL_SCHEDULE)
-    current_explanation = deepcopy(_ORIGINAL_EXPLANATION)
-    current_employees = deepcopy(_ORIGINAL_EMPLOYEES)
+    global current_schedule, current_explanation, current_employees, current_solver_context
+    current_schedule = deepcopy(_BOOT_SCHEDULE)
+    current_explanation = deepcopy(_BOOT_EXPLANATION)
+    current_employees = deepcopy(_BOOT_EMPLOYEES)
+    current_solver_context = deepcopy(_BOOT_SOLVER_CONTEXT)
     pending_changes.clear()
     return {"schedule": deepcopy(current_schedule), "explanation": deepcopy(current_explanation),
             "employees": deepcopy(current_employees)}
@@ -162,8 +270,9 @@ def update(request: UpdateRequest):
     parsed, source = parse_message(request.message, current_employees, current_schedule)
     employee_name = parsed["employee"]
     employee = next((person for person in current_employees if person["name"] == employee_name), None)
-    day, shift, role = parsed["day"], parsed["shift"], parsed["role"]
-    action = {"type": parsed["type"], "employee": employee_name, "day": day, "shift": shift, "role": role}
+    day, window_name, task = parsed["day"], parsed["shift"], parsed["role"]
+    action = {"type": parsed["type"], "employee": employee_name, "day": day,
+              "shift": window_name, "role": task}
 
     def respond(reply, change=None, approval=False, reason=None):
         return _response(reply, change, approval, reason, source=source, parsed=action)
@@ -171,67 +280,84 @@ def update(request: UpdateRequest):
     if parsed["type"] == "question":
         return respond(parsed["reply"])
     if parsed["type"] == "unknown":
-        reply = parsed["reply"] or 'I can help with callouts and shift coverage. Try “Maria called out Friday dinner” or “Leo will cover Saturday dinner grill”.'
-        return respond(reply)
+        return respond(parsed["reply"] or 'I can help with callouts and window coverage. Try “a rostered employee called out Friday Dinner Rush” or “cover Friday Dinner Rush on Grill”.')
     if employee is None:
-        return respond(parsed["reply"] or "I couldn't match an employee name in that update. Please include a roster name and the shift details.")
+        return respond(parsed["reply"] or "I couldn't match an employee name in the roster. Please include the employee and window details.")
     if day is None:
         return respond(parsed["reply"] or f"Which day should I update for {employee['name']}?")
 
+    matching_windows = _window_matches(day, window_name)
     if parsed["type"] == "callout":
-        assigned = [item for item in current_schedule["assignments"]
-                    if item["employee_id"] == employee["employee_id"] and item["day"] == day
-                    and (shift is None or item["shift"] == shift) and (role is None or item["role"] == role)]
-        available_shifts = sorted({item["shift"] for item in assigned})
-        if shift is None and len(available_shifts) > 1:
-            shifts = ", ".join(available_shifts)
-            return respond(parsed["reply"] or f"{employee['name']} has multiple shifts on {day}: {shifts}. Which shift are they calling out from?")
-        if not assigned:
-            return respond(parsed["reply"] or f"I couldn't find a matching shift for {employee['name']} on {day}.")
-        removed = []
-        for item in assigned:
+        if window_name is not None and not matching_windows:
+            return respond(parsed["reply"] or f"I couldn't find {window_name} on {day}.")
+        assignments = [item for item in current_schedule["assignments"]
+                       if item["employee_id"] == employee["employee_id"] and item["day"] == day
+                       and (window_name is None or item["window_key"] in {window["key"] for window in matching_windows})
+                       and (task is None or item["task"].casefold() == task.casefold())]
+        distinct_windows = sorted({item["window_key"] for item in assignments})
+        if window_name is None and len(distinct_windows) > 1:
+            labels = ", ".join(next(window["name"] for window in current_schedule["windows"] if window["key"] == key)
+                               for key in distinct_windows)
+            return respond(f"{employee['name']} has multiple windows on {day}: {labels}. Which one are they calling out from?")
+        if not assignments:
+            return respond(parsed["reply"] or f"I couldn't find a matching window for {employee['name']} on {day}.")
+        for item in assignments:
             current_schedule["assignments"].remove(item)
-            removed.append(item)
         _recompute()
-        shift_label = ", ".join(item["shift"] for item in removed)
-        return respond(parsed["reply"] or f"Updated: {employee['name']} is marked out for {day} {shift_label}. Coverage gaps have been refreshed.",
-                       {"type": "callout", "employee": employee["name"], "day": day, "shifts": shift_label})
+        labels = ", ".join(sorted({item["window"] for item in assignments}))
+        return respond(parsed["reply"] or f"Updated: {employee['name']} is marked out for {day} {labels}. Coverage has been refreshed.",
+                       {"type": "callout", "employee": employee["name"], "day": day, "window": labels})
 
-    if shift is None or role is None:
-        missing = " and ".join(label for label, value in (("shift", shift), ("role", role)) if value is None)
-        return respond(parsed["reply"] or f"What {missing} should {employee['name']} cover on {day}?")
-    if role not in employee["roles"]:
-        return respond(parsed["reply"] or f"{employee['name']} isn't listed as trained for {role}. No schedule change was made.")
-    if any(item["employee_id"] == employee["employee_id"] and item["day"] == day and item["shift"] == shift
+    if window_name is None:
+        return respond(parsed["reply"] or f"Which window should {employee['name']} cover on {day}?")
+    if task is None:
+        return respond(parsed["reply"] or f"Which task should {employee['name']} cover during {window_name} on {day}?")
+    matching_windows = _window_matches(day, window_name)
+    if not matching_windows:
+        return respond(f"I couldn't find {window_name} on {day}. No schedule change was made.")
+    if len(matching_windows) > 1:
+        return respond(f"More than one window is named {window_name} on {day}; please specify a more exact window.")
+    window = matching_windows[0]
+    if task not in employee["tasks"]:
+        return respond(f"{employee['name']} isn't listed as trained for {task}. No schedule change was made.")
+    if any(item["employee_id"] == employee["employee_id"] and item["window_key"] == window["key"]
            for item in current_schedule["assignments"]):
-        return respond(parsed["reply"] or f"{employee['name']} is already working {day} {shift}. No schedule change was made.")
-    gap = _find_gap(day, shift, role)
-    if not gap:
-        return respond(parsed["reply"] or f"There's no open {role} gap on {day} {shift} to cover. No schedule change was made.")
+        return respond(f"{employee['name']} is already working {day} {window_name}. No schedule change was made.")
+    if not _find_gap(window["key"], task):
+        return respond(f"There's no open {task} gap in {window_name} on {day}. No schedule change was made.")
 
-    candidate = _cover_assignment(employee, day, shift, role)
-    weekly_hours = sum(item["hours"] for item in current_schedule["assignments"]
-                       if item["employee_id"] == employee["employee_id"]) + candidate["hours"]
+    candidate = _make_cover_assignment(employee, window, task)
+    if candidate is None:
+        return respond(f"I don't have a pay rate for {employee['name']} on {task}. No schedule change was made.")
+    weekly_hours = employee["hours_scheduled"] + candidate["hours"]
     reasons = []
-    if weekly_hours > employee["max_weekly_hours"]:
-        reasons.append(f"{employee['name']} would reach {weekly_hours:g}h this week, above their {employee['max_weekly_hours']}h max.")
+    max_hours = employee.get("max_hours")
+    if max_hours is not None and weekly_hours > max_hours:
+        reasons.append(f"{employee['name']} would reach {weekly_hours:g}h this week, above their {max_hours:g}h max.")
     if weekly_hours > 40:
         reasons.append(f"{employee['name']} would reach {weekly_hours:g}h this week, above 40h.")
-    turnaround_conflicts = _turnaround_conflicts(employee["employee_id"], candidate)
-    if turnaround_conflicts:
-        reasons.append(f"This cover would leave less than 11 hours between a closing shift and the next opening shift for {employee['name']}.")
+    threshold = _overtime_threshold(employee["employee_id"])
+    if threshold is not None and weekly_hours > threshold:
+        reasons.append(f"{employee['name']} would exceed their {threshold:g}h overtime threshold.")
+    turnaround = _turnaround_conflicts(employee["employee_id"], candidate)
+    if turnaround:
+        reasons.append(f"This cover would leave less than 11 hours between {turnaround[0]['window']} and {turnaround[1]['window']} for {employee['name']}.")
     if reasons:
         reason = " ".join(reasons) + " May trigger premium pay."
         change_id = str(uuid.uuid4())
-        change = {"id": change_id, "type": "cover", "employee": employee["name"], "employee_id": employee["employee_id"],
-                  "day": day, "shift": shift, "role": role, "hours": candidate["hours"]}
+        change = {"id": change_id, "type": "cover", "employee": employee["name"],
+                  "employee_id": employee["employee_id"], "day": day,
+                  "window_key": window["key"], "window": window["name"],
+                  "task": task, "hours": candidate["hours"]}
         pending_changes[change_id] = deepcopy(change)
-        return respond(f"I’ve prepared {employee['name']} to cover {day} {shift} {role}, pending your approval.",
+        return respond(f"I’ve prepared {employee['name']} to cover {day} {window_name} {task}, pending your approval.",
                        change, True, reason)
 
-    _apply_cover(employee, day, shift, role)
-    return respond(parsed["reply"] or f"Updated: {employee['name']} is covering {day} {shift} {role}.",
-                   {"type": "cover", "employee": employee["name"], "day": day, "shift": shift, "role": role})
+    _apply_cover(employee, window, task)
+    return respond(parsed["reply"] or f"Updated: {employee['name']} is covering {day} {window_name} {task}.",
+                   {"type": "cover", "employee": employee["name"], "day": day,
+                    "window": window["name"], "task": task})
+
 
 @app.post("/api/approve")
 def approve(request: ApprovalRequest):
@@ -239,9 +365,10 @@ def approve(request: ApprovalRequest):
     if change is None:
         return _response("That approval request is no longer available. The schedule was not changed.")
     if not request.approve:
-        return _response(f"Rejected. {change['employee']}'s {change['day']} {change['shift']} cover was not applied.")
+        return _response(f"Rejected. {change['employee']}'s {change['day']} {change['window']} cover was not applied.")
     employee = next(person for person in current_employees if person["employee_id"] == change["employee_id"])
-    _apply_cover(employee, change["day"], change["shift"], change["role"])
-    return _response(f"Approved: {employee['name']} is covering {change['day']} {change['shift']} {change['role']}.",
+    window = next(item for item in current_schedule["windows"] if item["key"] == change["window_key"])
+    _apply_cover(employee, window, change["task"])
+    return _response(f"Approved: {employee['name']} is covering {change['day']} {change['window']} {change['task']}.",
                      {"type": "cover", "employee": employee["name"], "day": change["day"],
-                      "shift": change["shift"], "role": change["role"]})
+                      "window": change["window"], "task": change["task"]})
