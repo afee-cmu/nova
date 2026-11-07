@@ -1,3 +1,6 @@
 .env*
 schedule.xlsx
 extracted_input.json
+__pycache__/
+*.py[cod]
+bonapp-upload-*.xlsx

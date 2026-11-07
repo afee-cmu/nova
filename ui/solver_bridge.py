@@ -7,6 +7,7 @@ from .mock_data import EMPLOYEES as MOCK_EMPLOYEES, EXPLANATION as MOCK_EXPLANAT
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE_PATH = ROOT / "schedule_input_template.xlsx"
+DEMO_INPUT_PATH = Path(__file__).resolve().parent / "demo_data" / "demo_input.xlsx"
 
 
 class DemoInputError(RuntimeError):
@@ -49,9 +50,9 @@ def load_workbook_input(path):
 
 
 def load_demo_input():
-    """Load and validate the shipped demo workbook."""
+    """Load and validate the generated demo workbook, not the blank template."""
     try:
-        return load_workbook_input(TEMPLATE_PATH)
+        return load_workbook_input(DEMO_INPUT_PATH)
     except WorkbookValidationError as error:
         joined = "\n- ".join(error.errors)
         raise DemoInputError(f"Demo workbook validation failed:\n- {joined}", error.warnings) from error
@@ -78,6 +79,58 @@ def solve_workbook(path):
     schedule["data_source"] = "upload"
     explanation = build_explanation(schedule, inputs)
     return schedule, explanation, deepcopy(schedule["employees"]), inputs, perf_counter() - started
+
+
+def propose_replan(schedule_state, employee_id, window_key=None, day=None):
+    """Return a normalized, uncommitted callout re-plan proposal.
+
+    `schedule_state` carries the V2 schedule plus the exact original scheduler
+    inputs returned by load_demo_input/load_workbook_input. Returns (proposal,
+    None) on success or (None, reason) when re-optimization cannot be used.
+    """
+    from time import perf_counter
+
+    inputs = schedule_state.get("solver_inputs")
+    original = schedule_state.get("schedule")
+    if not inputs or not original:
+        return None, "The current schedule has no saved real solver inputs."
+    try:
+        from reoptimize import reoptimize
+
+        current_assignments = [{
+            "employee_id": item["employee_id"],
+            "employee_name": item["name"],
+            "shift": item["window_key"],
+            "role": item["task"].casefold(),
+        } for item in original.get("assignments", [])]
+        cancellation = {"employee_id": employee_id}
+        if window_key is not None:
+            cancellation["shift"] = window_key
+        elif day is not None:
+            cancellation["day"] = day
+
+        started = perf_counter()
+        result = reoptimize(
+            inputs["scheduler_employees"], inputs["config"], current_assignments,
+            cancel=[cancellation], time_limit_s=5,
+        )
+        elapsed = perf_counter() - started
+        status = result.get("status")
+        if status not in {"optimal", "feasible"}:
+            return None, f"Re-planning returned status {status or 'unknown'}."
+
+        proposal_schedule = normalize(result, inputs)
+        proposal_schedule["data_source"] = original.get("data_source", "solver")
+        return {
+            "status": status,
+            "schedule": proposal_schedule,
+            "diff": result.get("diff", {"kept": [], "added": [], "removed": []}),
+            "flags": result.get("flags", []),
+            "problems": result.get("problems", []),
+            "solve_seconds": elapsed,
+        }, None
+    except Exception as error:
+        return None, f"Re-planning failed ({type(error).__name__})."
 
 
 def normalize(result, inputs):

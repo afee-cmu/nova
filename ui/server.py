@@ -2,6 +2,7 @@
 
 import os
 import logging
+import re
 import tempfile
 import uuid
 from copy import deepcopy
@@ -15,7 +16,8 @@ from pydantic import BaseModel
 from .llm import parse_message
 from .mock_data import EMPLOYEES as MOCK_EMPLOYEES, SCHEDULE as MOCK_SCHEDULE
 from .solver_bridge import (TEMPLATE_PATH, WorkbookValidationError, build_explanation,
-                            initialize_demo, normalize_mock, solve_workbook)
+                            initialize_demo, normalize_mock, propose_replan,
+                            solve_workbook)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -283,31 +285,83 @@ def update(request: UpdateRequest):
         return respond(parsed["reply"] or 'I can help with callouts and window coverage. Try “a rostered employee called out Friday Dinner Rush” or “cover Friday Dinner Rush on Grill”.')
     if employee is None:
         return respond(parsed["reply"] or "I couldn't match an employee name in the roster. Please include the employee and window details.")
-    if day is None:
+    if parsed["type"] != "callout" and day is None:
         return respond(parsed["reply"] or f"Which day should I update for {employee['name']}?")
 
-    matching_windows = _window_matches(day, window_name)
     if parsed["type"] == "callout":
-        if window_name is not None and not matching_windows:
+        original_schedule = deepcopy(current_schedule)
+        original_inputs = deepcopy(current_solver_context)
+        callout_window = window_name
+        full_week = bool(re.search(r"\b(all week|whole week|entire week|this week|for the week|rest of the week)\b",
+                                   request.message.casefold()))
+        if day is None and not full_week:
+            return respond(parsed["reply"] or f"Which day or window is {employee['name']} calling out from?")
+        if full_week:
+            window_name = None
+            task = None
+        if window_name is not None and day is not None and not _window_matches(day, window_name):
             return respond(parsed["reply"] or f"I couldn't find {window_name} on {day}.")
         assignments = [item for item in current_schedule["assignments"]
-                       if item["employee_id"] == employee["employee_id"] and item["day"] == day
-                       and (window_name is None or item["window_key"] in {window["key"] for window in matching_windows})
-                       and (task is None or item["task"].casefold() == task.casefold())]
-        distinct_windows = sorted({item["window_key"] for item in assignments})
-        if window_name is None and len(distinct_windows) > 1:
-            labels = ", ".join(next(window["name"] for window in current_schedule["windows"] if window["key"] == key)
-                               for key in distinct_windows)
-            return respond(f"{employee['name']} has multiple windows on {day}: {labels}. Which one are they calling out from?")
+                       if item["employee_id"] == employee["employee_id"]
+                       and (day is None or item["day"] == day)
+                       and (window_name is None or item["window"].casefold() == window_name.casefold())
+                       and (window_name is None or task is None or item["task"].casefold() == task.casefold())]
         if not assignments:
-            return respond(parsed["reply"] or f"I couldn't find a matching window for {employee['name']} on {day}.")
+            scope = f"{day} {window_name}".strip() if day else "this week"
+            return respond(parsed["reply"] or f"I couldn't find a scheduled assignment for {employee['name']} in {scope}.")
         for item in assignments:
             current_schedule["assignments"].remove(item)
         _recompute()
-        labels = ", ".join(sorted({item["window"] for item in assignments}))
-        return respond(parsed["reply"] or f"Updated: {employee['name']} is marked out for {day} {labels}. Coverage has been refreshed.",
-                       {"type": "callout", "employee": employee["name"], "day": day, "window": labels})
+        labels = ", ".join(f"{item['day']} {item['window']} {item['task']}" for item in assignments)
+        scope = labels if window_name or day is None else f"{day}"
 
+        cancellation = {"employee_id": employee["employee_id"]}
+        cancelled_window_key = None
+        if window_name is not None and day is not None:
+            cancelled_window_key = next(item["window_key"] for item in assignments)
+            cancellation["shift"] = cancelled_window_key
+        elif day is not None:
+            cancellation["day"] = day
+
+        proposal, replan_reason = propose_replan(
+            {"schedule": original_schedule, "solver_inputs": original_inputs},
+            employee["employee_id"], window_key=cancelled_window_key,
+            day=day if cancelled_window_key is None and day is not None else None,
+        )
+        if proposal is None:
+            reply = (f"I removed {employee['name']} from {scope}. Re-planning is not available right now, "
+                     "so the shift is uncovered.")
+            change = {"type": "callout", "employee": employee["name"], "day": day,
+                      "window": callout_window, "reason": replan_reason}
+            return respond(reply, change)
+
+        raw_diff = proposal["diff"]
+        cancelled_triples = {(item["employee_id"], item["window_key"], item["task"].casefold())
+                             for item in assignments}
+        extra_removed = [item for item in raw_diff.get("removed", [])
+                         if (item["employee_id"], item["shift"], item["role"].casefold()) not in cancelled_triples]
+        display_diff = {**raw_diff, "removed": extra_removed}
+        added_count = len(raw_diff.get("added", []))
+        removed_count = len(extra_removed)
+        change_count = added_count + len(raw_diff.get("removed", []))
+        cost_delta = proposal["schedule"]["labor_cost"] - original_schedule["labor_cost"]
+        cost_change = f"+${cost_delta:,.2f}" if cost_delta >= 0 else f"-${abs(cost_delta):,.2f}"
+        summary = (f"Re-plan: {change_count} change{'s' if change_count != 1 else ''} "
+                   f"(+{added_count} added, -{removed_count} removed besides the call-out). "
+                   f"Labor cost {cost_change}.")
+        change_id = str(uuid.uuid4())
+        flags = proposal["flags"]
+        change = {"change_id": change_id, "kind": "replan", "diff": display_diff,
+                  "flags": flags, "summary": summary}
+        pending_changes[change_id] = {
+            **change, "employee": employee["name"], "day": day,
+            "window": callout_window, "schedule": proposal["schedule"],
+            "problems": proposal["problems"], "solve_seconds": proposal["solve_seconds"],
+        }
+        reply = f"I removed {employee['name']} from {scope}. BonApp has a re-plan ready for your approval."
+        return respond(reply, change)
+
+    matching_windows = _window_matches(day, window_name)
     if window_name is None:
         return respond(parsed["reply"] or f"Which window should {employee['name']} cover on {day}?")
     if task is None:
@@ -364,6 +418,17 @@ def approve(request: ApprovalRequest):
     change = pending_changes.pop(request.change_id, None)
     if change is None:
         return _response("That approval request is no longer available. The schedule was not changed.")
+    if change.get("kind") == "replan":
+        if not request.approve:
+            return _response("Kept the schedule with the uncovered shift.",
+                             {"kind": "replan", "approved": False})
+        global current_schedule, current_explanation, current_employees
+        current_schedule = deepcopy(change["schedule"])
+        current_employees = deepcopy(current_schedule["employees"])
+        current_schedule["employees"] = deepcopy(current_employees)
+        current_explanation = build_explanation(current_schedule, current_solver_context)
+        return _response("Re-plan approved. The updated schedule is now in effect.",
+                         {"kind": "replan", "approved": True, "diff": change["diff"]})
     if not request.approve:
         return _response(f"Rejected. {change['employee']}'s {change['day']} {change['window']} cover was not applied.")
     employee = next(person for person in current_employees if person["employee_id"] == change["employee_id"])

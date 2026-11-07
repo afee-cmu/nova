@@ -31,6 +31,8 @@
     .gap-card.is-dismissing { opacity: 0; transform: translateY(-5px); }
     @keyframes schedule-change-flash { 0%, 100% { background-color: inherit; } 15%, 75% { background-color: #fff0b8; box-shadow: 0 0 0 2px #f1c644; } }
     .schedule-updated { animation: schedule-change-flash 2s ease-out; }
+    .replan-preview-added { outline: 3px dashed #2b9b60; outline-offset: 2px; }
+    .replan-preview-removed { outline: 3px dashed #d63b2a; outline-offset: 2px; }
     .schedule-scroll { overflow-x: auto; }
     .schedule-grid { min-width: 1020px; }
     .chat-scroll { max-height: 170px; overflow-y: auto; }
@@ -106,6 +108,12 @@
       <div id="approval-banner" class="mb-2 hidden rounded-xl border border-[#f4c37b] bg-[#fff5e5] px-4 py-3 text-sm text-[#754500]">
         <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="font-extrabold">Manager approval needed: possible premium pay</p><p id="approval-reason" class="mt-1"></p></div><div class="flex gap-2"><button id="approve-change" class="rounded-lg bg-[#FF3008] px-4 py-2 font-bold text-white">Approve</button><button id="reject-change" class="rounded-lg border border-[#d8b27c] bg-white px-4 py-2 font-bold text-[#754500]">Reject</button></div></div>
       </div>
+      <div id="replan-card" class="mb-2 hidden rounded-2xl border border-[#d9e9de] bg-white p-4 shadow-sm" aria-live="polite">
+        <div class="flex flex-wrap items-start justify-between gap-3"><div><p class="text-lg font-extrabold text-[#5C0000]">BonApp suggests a re-plan</p><p id="replan-summary" class="mt-1 text-sm font-semibold text-[#514845]"></p></div><span id="replan-review-note" class="hidden rounded-full bg-[#fff1da] px-3 py-1 text-xs font-extrabold text-[#925400]">Manager review recommended</span></div>
+        <div id="replan-diff" class="mt-3 space-y-1.5 text-sm font-bold"></div>
+        <div id="replan-flags" class="mt-3 flex flex-wrap gap-1.5"></div>
+        <div class="mt-4 flex justify-end gap-2"><button id="replan-reject" type="button" class="rounded-lg border border-[#ded7d3] bg-white px-4 py-2 font-bold text-[#655a55] hover:bg-[#f7f4f2]">Reject</button><button id="replan-approve" type="button" class="rounded-lg bg-[#FF3008] px-4 py-2 font-extrabold text-white hover:bg-[#e32906]">Approve</button></div>
+      </div>
       <div id="chat-messages" class="chat-scroll mb-2 space-y-2" aria-live="polite"></div>
       <div id="example-chips" class="mb-2 flex flex-wrap gap-2"></div>
       <form id="update-form" class="flex gap-2">
@@ -134,6 +142,8 @@
     let copiedTimer = null;
     let chatMessages = [];
     let pendingApprovalId = null;
+    let pendingApprovalKind = null;
+    let pendingReplanChange = null;
     let generatedThisSession = false;
     let selectedWorkbook = null;
     const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value || 0);
@@ -300,10 +310,11 @@
         else { badge.textContent = 'Offline mode (keyword)'; badge.className = 'rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600'; }
       } catch (error) { badge.textContent = 'Offline mode (keyword)'; badge.className = 'rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600'; }
     }
-    function setTyping(isTyping) {
+    function setTyping(isTyping, label = 'BonApp is updating') {
       const container = document.getElementById('chat-messages');
       let indicator = document.getElementById('typing-indicator');
-      if (isTyping && !indicator) { indicator = document.createElement('div'); indicator.id = 'typing-indicator'; indicator.className = 'flex justify-start'; indicator.innerHTML = '<div class="rounded-2xl rounded-bl-md bg-[#f2efed] px-3.5 py-2 text-sm font-semibold text-[#766d69]">BonApp is updating<span class="inline-block w-5 animate-pulse">…</span></div>'; container.appendChild(indicator); }
+      if (isTyping && !indicator) { indicator = document.createElement('div'); indicator.id = 'typing-indicator'; indicator.className = 'flex justify-start'; container.appendChild(indicator); }
+      if (isTyping && indicator) indicator.innerHTML = `<div class="rounded-2xl rounded-bl-md bg-[#f2efed] px-3.5 py-2 text-sm font-semibold text-[#766d69]">${esc(label)}<span class="inline-block w-5 animate-pulse">…</span></div>`;
       else if (!isTyping && indicator) indicator.remove();
       container.scrollTop = container.scrollHeight;
     }
@@ -313,6 +324,40 @@
       const changed = new Set();
       if (flash && before) { const after = cellSignatures(data.schedule); for (const [cell, values] of after) if (JSON.stringify(values) !== JSON.stringify(before.get(cell))) changed.add(cell); }
       renderStats(data.schedule); renderLegend(); renderGrid(data.schedule, changed); renderInsights(data.explanation, data.schedule);
+    }
+    function setReplanPreview(active) {
+      document.querySelectorAll('.replan-preview-added, .replan-preview-removed').forEach(card => card.classList.remove('replan-preview-added', 'replan-preview-removed'));
+      if (!active || !pendingReplanChange) return;
+      const findWindowCard = key => document.querySelector(`[data-window-card="${CSS.escape(key)}"]`);
+      for (const item of pendingReplanChange.diff?.added || []) findWindowCard(item.shift)?.classList.add('replan-preview-added');
+      for (const item of pendingReplanChange.diff?.removed || []) findWindowCard(item.shift)?.classList.add('replan-preview-removed');
+    }
+    function renderReplanProposal(change) {
+      const card = document.getElementById('replan-card');
+      if (!change) { card.classList.add('hidden'); setReplanPreview(false); return; }
+      const schedule = pageData?.schedule;
+      const formatEntry = (item, symbol) => {
+        const window = schedule?.windows.find(row => row.key === item.shift);
+        const task = schedule?.tasks.find(value => value.toLowerCase() === item.role.toLowerCase()) || item.role;
+        return `<p class="${symbol === '+' ? 'text-emerald-800' : 'text-red-800'}">${symbol} ${esc(item.employee_name)} ${symbol === '+' ? '->' : '<-'} ${esc(window?.day || '')} ${esc(window?.name || item.shift)} ${esc(task)}</p>`;
+      };
+      const added = change.diff?.added || []; const removed = change.diff?.removed || [];
+      document.getElementById('replan-summary').textContent = change.summary || 'Review the proposed schedule changes.';
+      document.getElementById('replan-diff').innerHTML = [...added.map(item => formatEntry(item, '+')), ...removed.map(item => formatEntry(item, '-'))].join('') || '<p class="text-sm font-semibold text-[#766d69]">No additional assignments changed.</p>';
+      const flags = change.flags || [];
+      document.getElementById('replan-flags').innerHTML = flags.map(flag => {
+        const severity = String(flag.severity || 'info').toLowerCase();
+        const style = ['error', 'high'].includes(severity) ? 'bg-red-50 text-red-800' : ['warning', 'medium'].includes(severity) ? 'bg-orange-50 text-orange-800' : 'bg-gray-100 text-gray-700';
+        return `<span class="rounded-full px-2.5 py-1 text-[11px] font-semibold ${style}">${esc(flag.message)}</span>`;
+      }).join('');
+      const managerReview = flags.some(flag => ['error', 'warning', 'high', 'medium'].includes(String(flag.severity || '').toLowerCase()));
+      document.getElementById('replan-review-note').classList.toggle('hidden', !managerReview);
+      document.getElementById('replan-approve').textContent = managerReview ? 'Approve anyway' : 'Approve';
+      card.classList.remove('hidden');
+      card.onmouseenter = () => setReplanPreview(true);
+      card.onmouseleave = () => setReplanPreview(false);
+      card.onfocusin = () => setReplanPreview(true);
+      card.onfocusout = event => { if (!card.contains(event.relatedTarget)) setReplanPreview(false); };
     }
     function renderExamples(schedule) {
       const root = document.getElementById('example-chips');
@@ -340,15 +385,23 @@
       if (pendingApprovalId) { chatMessages.push({ role: 'assistant', text: 'Please approve or reject the pending change before sending another update.' }); renderChat(); return; }
       chatMessages.push({ role: 'user', text: value }); renderChat();
       document.getElementById('update-input').value = '';
-      document.getElementById('send-update').disabled = true; setTyping(true);
+      const calloutLike = /\b(called out|sick|can't come|cannot come|cant come|off|unavailable|won't make it|not coming)\b/i.test(value);
+      document.getElementById('send-update').disabled = true; setTyping(true, calloutLike ? 'Re-planning' : 'BonApp is updating');
       try {
         const response = await fetch('/api/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: value }) });
         if (!response.ok) throw new Error(`Request failed (${response.status})`);
         const result = await response.json();
         chatMessages.push({ role: 'assistant', text: result.reply, understood: understoodAs(result.parsed), source: result.source });
-        if (result.needs_manager_approval && result.change?.id) {
-          pendingApprovalId = result.change.id; document.getElementById('approval-reason').textContent = result.reason || ''; document.getElementById('approval-banner').classList.remove('hidden');
+        if (result.change?.kind === 'replan' && result.change?.change_id) {
+          pendingApprovalId = result.change.change_id; pendingApprovalKind = 'replan'; pendingReplanChange = result.change;
+          document.getElementById('approval-banner').classList.add('hidden');
+          await refreshFromData({ schedule: result.schedule, explanation: result.explanation, employees: result.employees }, true);
+          renderReplanProposal(result.change);
+        } else if (result.needs_manager_approval && result.change?.id) {
+          pendingApprovalId = result.change.id; pendingApprovalKind = 'cover'; pendingReplanChange = null; renderReplanProposal(null);
+          document.getElementById('approval-reason').textContent = result.reason || ''; document.getElementById('approval-banner').classList.remove('hidden');
         } else if (result.change) {
+          pendingApprovalKind = null; pendingReplanChange = null; renderReplanProposal(null);
           document.getElementById('approval-banner').classList.add('hidden');
           await refreshFromData({ schedule: result.schedule, explanation: result.explanation, employees: result.employees }, true);
         }
@@ -357,20 +410,29 @@
     }
     async function resolveApproval(approve) {
       if (!pendingApprovalId) return;
-      document.getElementById('approve-change').disabled = true; document.getElementById('reject-change').disabled = true;
+      const isReplan = pendingApprovalKind === 'replan';
+      const approveButton = document.getElementById(isReplan ? 'replan-approve' : 'approve-change');
+      const rejectButton = document.getElementById(isReplan ? 'replan-reject' : 'reject-change');
+      approveButton.disabled = true; rejectButton.disabled = true;
       try {
         const response = await fetch('/api/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ change_id: pendingApprovalId, approve }) });
         if (!response.ok) throw new Error(`Request failed (${response.status})`);
-        const result = await response.json(); pendingApprovalId = null; document.getElementById('approval-banner').classList.add('hidden');
+        const result = await response.json(); pendingApprovalId = null; pendingApprovalKind = null; pendingReplanChange = null;
+        document.getElementById('approval-banner').classList.add('hidden'); renderReplanProposal(null);
         chatMessages.push({ role: 'assistant', text: result.reply });
-        await refreshFromData({ schedule: result.schedule, explanation: result.explanation, employees: result.employees }, approve && Boolean(result.change));
+        if (isReplan && !approve) {
+          showToast('Kept the schedule with the uncovered shift.');
+        } else {
+          await refreshFromData({ schedule: result.schedule, explanation: result.explanation, employees: result.employees }, approve && Boolean(result.change));
+        }
       } catch (error) { chatMessages.push({ role: 'assistant', text: `I couldn't resolve that approval. ${error.message}` }); }
-      finally { document.getElementById('approve-change').disabled = false; document.getElementById('reject-change').disabled = false; renderChat(); }
+      finally { approveButton.disabled = false; rejectButton.disabled = false; renderChat(); }
     }
     async function resetDemo() {
       try {
         const response = await fetch('/api/reset', { method: 'POST' }); if (!response.ok) throw new Error(`Request failed (${response.status})`);
-        const data = await response.json(); pendingApprovalId = null; document.getElementById('approval-banner').classList.add('hidden');
+        const data = await response.json(); pendingApprovalId = null; pendingApprovalKind = null; pendingReplanChange = null;
+        document.getElementById('approval-banner').classList.add('hidden'); renderReplanProposal(null);
         generatedThisSession = true; chatMessages = [{ role: 'assistant', text: 'Demo schedule reset to its original state.' }];
         showScheduleView(); await refreshFromData(data, true); renderChat();
       } catch (error) { showToast(`Could not reset demo: ${error.message}`); }
@@ -456,8 +518,8 @@
         if (!response.ok || !result.ok) throw new Error(result.error || `Upload failed (${response.status})`);
         clearInterval(timer); step = steps.length; paintStep();
         validateSchedulePayload(result);
-        generatedThisSession = true; pendingApprovalId = null;
-        document.getElementById('approval-banner').classList.add('hidden');
+        generatedThisSession = true; pendingApprovalId = null; pendingApprovalKind = null; pendingReplanChange = null;
+        document.getElementById('approval-banner').classList.add('hidden'); renderReplanProposal(null);
         showScheduleView();
         await refreshFromData(result, false);
         showToast(`Schedule generated in ${Number(result.solve_seconds || 0).toFixed(1)}s`);
@@ -474,6 +536,8 @@
     document.getElementById('update-form').addEventListener('submit', event => { event.preventDefault(); sendUpdate(document.getElementById('update-input').value); });
     document.getElementById('approve-change').addEventListener('click', () => resolveApproval(true));
     document.getElementById('reject-change').addEventListener('click', () => resolveApproval(false));
+    document.getElementById('replan-approve').addEventListener('click', () => resolveApproval(true));
+    document.getElementById('replan-reject').addEventListener('click', () => resolveApproval(false));
     document.getElementById('reset-demo').addEventListener('click', resetDemo);
     document.getElementById('show-data-in').addEventListener('click', showDataInView);
     document.getElementById('back-to-schedule').addEventListener('click', showScheduleView);
