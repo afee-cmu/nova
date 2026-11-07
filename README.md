@@ -158,6 +158,7 @@ The UI keeps state in process memory and has no authentication or tenant separat
 
 ## Team and credits
 
-- Name - role
-- Name - role
-- Name - role
+- Jessie Lu
+- Aiden Fee
+- Dean Mairaj
+- Jordan Zubkoff
