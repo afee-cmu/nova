@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BonApp</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root { --dd-red: #FF3008; --maroon: #5C0000; --ink: #24201f; --muted: #766d69; --line: #e9e5e3; --paper: #f6f5f4; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .role-grill { --role: #ffede8; --role-ink: #a9280c; }
+    .role-fry { --role: #fff2d6; --role-ink: #815a00; }
+    .role-prep { --role: #e7f4eb; --role-ink: #276642; }
+    .role-cashier { --role: #edeaff; --role-ink: #51439a; }
+    .role-pack { --role: #e4f2f7; --role-ink: #25627a; }
+    .employee-chip { display: flex; width: 100%; align-items: center; gap: 10px; border: 1px solid #eee9e7; background: white; border-radius: 12px; padding: 10px 11px; text-align: left; transition: transform .15s, box-shadow .15s; }
+    .employee-chip:hover { transform: translateY(-1px); box-shadow: 0 4px 12px #311b1512; }
+    .role-dot, .legend-dot { background: var(--role-ink); flex: none; }
+    .role-dot { width: 9px; height: 9px; border-radius: 50%; }
+    .role-pill { background: var(--role); color: var(--role-ink); }
+    .schedule-cell { min-height: 172px; }
+    .gap-cell { border-color: #ff8d79 !important; background: #fff8f6 !important; }
+    .drawer-backdrop { position: fixed; inset: 0; z-index: 40; background: #21171466; opacity: 0; pointer-events: none; transition: opacity .2s; }
+    .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+    .drawer { position: fixed; z-index: 50; inset: 0 0 0 auto; width: min(480px, 100%); background: white; box-shadow: -12px 0 40px #2117141c; transform: translateX(102%); transition: transform .24s ease; overflow-y: auto; }
+    .drawer.open { transform: translateX(0); }
+    .progress-track { height: 10px; border-radius: 99px; overflow: hidden; background: #eee9e7; }
+    .progress-fill { height: 100%; background: #31a56a; border-radius: inherit; transition: width .25s; }
+    .progress-fill.over90 { background: #f08a22; }
+    .schedule-layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; align-items: start; gap: 20px; }
+    .insights-panel { max-height: 860px; overflow-y: auto; }
+    .gap-cell { cursor: pointer; transition: border-width .12s, box-shadow .12s, background-color .12s; }
+    .gap-cell.is-highlighted, .gap-card.is-highlighted { border-color: #FF3008 !important; box-shadow: 0 0 0 3px #ff300829; background-color: #fff0ec !important; }
+    .gap-card { transition: opacity .18s, transform .18s, box-shadow .12s, background-color .12s; }
+    .gap-card.is-dismissing { opacity: 0; transform: translateY(-5px); }
+    @keyframes schedule-change-flash { 0%, 100% { background-color: inherit; } 15%, 75% { background-color: #fff0b8; box-shadow: 0 0 0 2px #f1c644; } }
+    .schedule-updated { animation: schedule-change-flash 2s ease-out; }
+    .chat-scroll { max-height: 170px; overflow-y: auto; }
+    @media (max-width: 640px) { .chat-scroll { max-height: 120px; } }
+    @media (max-width: 1099px) { .schedule-layout { grid-template-columns: minmax(0, 1fr); } .insights-panel { max-height: none; overflow: visible; } }
+    @media (max-width: 900px) { .schedule-scroll { overflow-x: auto; } .schedule-grid { min-width: 980px; } }
+  </style>
+</head>
+<body>
+  <main class="mx-auto max-w-[1600px] px-5 pt-7 pb-[340px] md:px-9 md:pt-10 md:pb-[340px]">
+    <header class="mb-7 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="grid h-12 w-12 place-items-center rounded-2xl bg-[#FF3008] text-xl font-black text-white">B</div>
+        <div><p class="text-xs font-bold uppercase tracking-[.18em] text-[#8d807b]">Restaurant operations</p><h1 class="text-3xl font-extrabold tracking-tight text-[#5C0000] md:text-4xl">BonApp</h1></div>
+      </div>
+      <div id="load-error" class="hidden max-w-xl rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-800" role="alert"></div>
+      <div class="flex flex-wrap items-center gap-3"><button id="reset-demo" class="rounded-xl border border-[#e2d9d5] bg-white px-4 py-2.5 text-sm font-bold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Reset demo</button><div id="status-chip" class="rounded-full border border-[#ffd2c8] bg-white px-4 py-2 text-sm font-bold text-[#5C0000]">Loading schedule…</div><div id="ai-mode-badge" class="rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600">Checking AI mode…</div></div>
+    </header>
+
+    <section class="mb-7 grid gap-4 md:grid-cols-3" aria-label="Schedule overview">
+      <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-[#766d69]">Total labor cost</p><p id="stat-cost" class="mt-2 text-3xl font-extrabold tracking-tight">—</p><p class="mt-1 text-sm text-[#918782]">Scheduled hours × hourly wage</p></article>
+      <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-[#766d69]">Coverage rate</p><p id="stat-coverage" class="mt-2 text-3xl font-extrabold tracking-tight">—</p><p class="mt-1 text-sm text-[#918782]">Filled staffing slots</p></article>
+      <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm"><p class="text-sm font-semibold text-[#766d69]">Coverage gaps</p><p id="stat-gaps" class="mt-2 text-3xl font-extrabold tracking-tight">—</p><p class="mt-1 text-sm text-[#918782]">Roles needing attention</p></article>
+    </section>
+
+    <div class="schedule-layout">
+    <section class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm md:p-6">
+      <div class="mb-5 flex flex-wrap items-end justify-between gap-3"><div><p class="text-xs font-bold uppercase tracking-[.16em] text-[#FF3008]">Weekly overview</p><h2 class="mt-1 text-2xl font-extrabold tracking-tight md:text-3xl">Team schedule</h2></div><p class="text-sm text-[#766d69]">Select an employee to view shift details</p></div>
+      <div id="legend" class="mb-5 flex flex-wrap gap-x-5 gap-y-2"></div>
+      <div class="schedule-scroll">
+        <div id="schedule-grid" class="schedule-grid grid grid-cols-[92px_repeat(7,minmax(118px,1fr))] gap-2" aria-label="Weekly schedule"></div>
+      </div>
+    </section>
+
+    <aside class="insights-panel rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm md:p-6" aria-labelledby="insights-title">
+      <div class="mb-5"><p class="text-xs font-bold uppercase tracking-[.16em] text-[#FF3008]">Schedule review</p><h2 id="insights-title" class="mt-1 text-2xl font-extrabold tracking-tight text-[#5C0000]">BonApp Insights</h2></div>
+      <div id="insights-content" class="space-y-4"></div>
+      <div id="dismissed-footer" class="mt-4 hidden border-t border-[#eee9e7] pt-4 text-center"></div>
+    </aside>
+    </div>
+    <p id="error-message" class="mt-5 hidden rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-800"></p>
+  </main>
+
+  <section id="update-bar" class="fixed inset-x-0 bottom-0 z-30 border-t border-[#e7dfdb] bg-white/95 px-4 py-3 shadow-[0_-8px_30px_#24140f12] backdrop-blur md:px-8">
+    <div class="mx-auto max-w-[1200px]">
+      <div id="approval-banner" class="mb-2 hidden rounded-xl border border-[#f4c37b] bg-[#fff5e5] px-4 py-3 text-sm text-[#754500]">
+        <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="font-extrabold">Manager approval needed: possible premium pay</p><p id="approval-reason" class="mt-1"></p></div><div class="flex gap-2"><button id="approve-change" class="rounded-lg bg-[#FF3008] px-4 py-2 font-bold text-white">Approve</button><button id="reject-change" class="rounded-lg border border-[#d8b27c] bg-white px-4 py-2 font-bold text-[#754500]">Reject</button></div></div>
+      </div>
+      <div id="chat-messages" class="chat-scroll mb-2 space-y-2" aria-live="polite"></div>
+      <div class="mb-2 flex flex-wrap gap-2">
+        <button type="button" class="example-chip rounded-full border border-[#f2c5bb] bg-[#fff7f5] px-3 py-1.5 text-xs font-bold text-[#8f260e]">Maria called out Friday dinner</button>
+        <button type="button" class="example-chip rounded-full border border-[#f2c5bb] bg-[#fff7f5] px-3 py-1.5 text-xs font-bold text-[#8f260e]">Leo will cover Saturday dinner grill</button>
+        <button type="button" class="example-chip rounded-full border border-[#f2c5bb] bg-[#fff7f5] px-3 py-1.5 text-xs font-bold text-[#8f260e]">Maria will cover Saturday dinner grill</button>
+        <button type="button" class="example-chip rounded-full border border-[#ded7d3] bg-white px-3 py-1.5 text-xs font-bold text-[#5C0000]">Who is working Friday dinner?</button>
+      </div>
+      <form id="update-form" class="flex gap-2">
+        <input id="update-input" autocomplete="off" class="min-w-0 flex-1 rounded-xl border border-[#ddd5d1] bg-[#faf9f8] px-4 py-3 text-sm outline-none placeholder:text-[#9a8e89] focus:border-[#FF3008]" placeholder="Tell BonApp what changed, or ask a question…" aria-label="Schedule update message">
+        <button id="send-update" class="rounded-xl bg-[#FF3008] px-6 py-3 text-sm font-extrabold text-white disabled:opacity-60" type="submit">Send</button>
+      </form>
+    </div>
+  </section>
+  <div id="toast" class="fixed bottom-6 left-1/2 z-[70] -translate-x-1/2 translate-y-3 rounded-xl bg-[#5C0000] px-5 py-3 text-sm font-bold text-white opacity-0 shadow-xl transition duration-200" role="status" aria-live="polite"></div>
+  <div id="drawer-backdrop" class="drawer-backdrop" aria-hidden="true"></div>
+  <aside id="employee-drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-name" aria-hidden="true">
+    <div class="border-b border-[#eee9e7] px-7 py-6"><div class="flex items-start justify-between gap-4"><div><p class="text-xs font-bold uppercase tracking-[.16em] text-[#FF3008]">Team member</p><h2 id="drawer-name" class="mt-1 text-3xl font-extrabold text-[#5C0000]"></h2></div><button id="drawer-close" class="grid h-10 w-10 place-items-center rounded-full bg-[#f4f1ef] text-2xl leading-none text-[#5C0000] hover:bg-[#eee7e4]" aria-label="Close employee details">×</button></div></div>
+    <div id="drawer-content" class="space-y-7 px-7 py-6"></div>
+  </aside>
+
+  <script>
+    const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const SHIFTS = ['lunch', 'dinner'];
+    const ROLE_NAMES = ['grill', 'fry', 'prep', 'cashier', 'pack'];
+    let pageData = null;
+    const dismissedGapIds = new Set();
+    let toastTimer = null;
+    let copiedTimer = null;
+    let chatMessages = [];
+    let pendingApprovalId = null;
+    const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
+    const esc = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+
+    function renderLegend() {
+      document.getElementById('legend').innerHTML = ROLE_NAMES.map(role => `<span class="role-${role} inline-flex items-center gap-2 text-sm font-semibold capitalize text-[#554b47]"><i class="legend-dot h-2.5 w-2.5 rounded-full"></i>${role}</span>`).join('');
+    }
+    function renderStats(schedule) {
+      document.getElementById('stat-cost').textContent = money(schedule.total_cost);
+      document.getElementById('stat-coverage').textContent = `${(schedule.coverage_rate * 100).toFixed(1)}%`;
+      document.getElementById('stat-gaps').textContent = schedule.gaps.length;
+      const chip = document.getElementById('status-chip');
+      chip.innerHTML = `<span class="mr-2 inline-block h-2 w-2 rounded-full bg-emerald-500"></span>${esc(schedule.status)}`;
+    }
+    function cellSignatures(schedule) {
+      const signatures = new Map();
+      for (const day of DAYS) for (const shift of SHIFTS) signatures.set(`${day}-${shift}`, []);
+      schedule.assignments.forEach(item => signatures.get(`${item.day}-${item.shift}`)?.push(`a:${item.employee_id}:${item.role}:${item.start}:${item.end}`));
+      schedule.gaps.forEach(item => signatures.get(`${item.day}-${item.shift}`)?.push(`g:${item.gap_id}:${item.needed}:${item.assigned}:${item.short_by}`));
+      for (const values of signatures.values()) values.sort();
+      return signatures;
+    }
+    function renderGrid(schedule, changedCells = new Set()) {
+      const grid = document.getElementById('schedule-grid');
+      const slots = new Map();
+      for (const day of DAYS) for (const shift of SHIFTS) slots.set(`${day}-${shift}`, { assignments: [], gaps: [] });
+      schedule.assignments.forEach(item => slots.get(`${item.day}-${item.shift}`)?.assignments.push(item));
+      schedule.gaps.forEach(item => slots.get(`${item.day}-${item.shift}`)?.gaps.push(item));
+      let html = '<div></div>' + DAYS.map(day => `<div class="pb-2 text-center text-sm font-extrabold uppercase tracking-wide text-[#766d69]">${day}</div>`).join('');
+      for (const shift of SHIFTS) {
+        html += `<div class="flex items-start pt-3 text-sm font-extrabold capitalize text-[#5C0000]">${shift}</div>`;
+        for (const day of DAYS) {
+          const slot = slots.get(`${day}-${shift}`);
+          const isGap = slot.gaps.length > 0;
+          const chips = slot.assignments.map(item => `<button class="employee-chip role-${esc(item.role)}" data-employee-id="${esc(item.employee_id)}"><i class="role-dot"></i><span class="min-w-0 flex-1 truncate text-sm font-bold text-[#342d2a]">${esc(item.name)}</span><span class="role-pill rounded-md px-2 py-1 text-[11px] font-bold capitalize">${esc(item.role)}</span></button>`).join('');
+          const gaps = slot.gaps.map(gap => `<div class="rounded-xl border border-dashed border-[#ff6b50] bg-white px-3 py-2"><div class="flex items-center gap-2 text-sm font-extrabold text-[#c12b0d]"><span class="text-base">＋</span>Need ${gap.short_by} ${esc(gap.role)}</div><p class="mt-1 pl-6 text-xs font-semibold text-[#9b5b4e]">${gap.assigned}/${gap.needed} filled</p></div>`).join('');
+          const gapHooks = slot.gaps.map(gap => `data-gap-cell-id="${esc(gap.gap_id)}"`).join(' ');
+          const coordinate = `${day}-${shift}`;
+          const flash = changedCells.has(coordinate) ? 'schedule-updated' : '';
+          html += `<div class="schedule-cell ${flash} flex flex-col gap-2 rounded-xl border ${isGap ? 'gap-cell' : 'border-[#eee9e7] bg-[#faf9f8]'} p-2" data-schedule-cell="${coordinate}" ${gapHooks}>${chips}${gaps}</div>`;
+        }
+      }
+      grid.innerHTML = html;
+      grid.querySelectorAll('[data-employee-id]').forEach(button => button.addEventListener('click', () => openDrawer(button.dataset.employeeId)));
+      grid.querySelectorAll('[data-gap-cell-id]').forEach(cell => {
+        cell.addEventListener('mouseenter', () => highlightGap(cell.dataset.gapCellId, true));
+        cell.addEventListener('mouseleave', () => highlightGap(cell.dataset.gapCellId, false));
+        cell.addEventListener('click', event => {
+          if (event.target.closest('[data-employee-id]')) return;
+          document.querySelector(`[data-gap-card="${CSS.escape(cell.dataset.gapCellId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+      });
+    }
+    function gapTitle(gap) {
+      if (!gap) return 'Schedule gap';
+      return `${gap.day} ${gap.shift}: short ${gap.short_by} ${gap.role}`;
+    }
+    function highlightGap(gapId, active) {
+      document.querySelectorAll(`[data-gap-card="${CSS.escape(gapId)}"], [data-gap-cell-id="${CSS.escape(gapId)}"]`).forEach(el => el.classList.toggle('is-highlighted', active));
+    }
+    function renderInsights(explanation, schedule) {
+      const container = document.getElementById('insights-content');
+      const footer = document.getElementById('dismissed-footer');
+      const items = explanation?.gap_explanations || [];
+      if (!explanation || !items.length) {
+        container.innerHTML = '<div class="rounded-xl border border-[#d9eadf] bg-[#f3faf5] p-5 text-base font-semibold leading-relaxed text-[#315b3d]">No issues found. Schedule is fully covered.</div>';
+        footer.classList.add('hidden');
+        return;
+      }
+      const summary = esc(explanation.summary || 'No summary available.');
+      const visibleItems = items.filter(item => !dismissedGapIds.has(item.gap_id));
+      const cards = visibleItems.map(item => {
+        const gap = schedule.gaps.find(entry => entry.gap_id === item.gap_id);
+        return `<article class="gap-card rounded-xl border border-[#eee1dd] bg-[#fffaf8] p-4" data-gap-card="${esc(item.gap_id)}">
+          <div class="mb-2 flex flex-wrap items-start justify-between gap-2"><h3 class="text-base font-extrabold leading-snug text-[#5C0000]">${esc(gapTitle(gap))}</h3>${item.needs_manager_approval ? '<span class="shrink-0 rounded-full bg-[#fff0d9] px-2.5 py-1 text-[11px] font-extrabold text-[#9a5900]">Needs manager approval</span>' : ''}</div>
+          <p class="text-sm leading-relaxed text-[#514845]">${esc(item.explanation || '')}</p>
+          <div class="mt-3 rounded-lg border-l-4 border-[#FF3008] bg-white px-3 py-2.5"><p class="mb-1 text-[11px] font-extrabold uppercase tracking-wider text-[#b22a0b]">Suggested action</p><p class="text-sm leading-relaxed text-[#3d3430]">${esc(item.suggested_action || '')}</p></div>
+          <div class="mt-4 flex gap-2"><button type="button" data-apply-fix="${esc(item.gap_id)}" class="flex-1 rounded-lg bg-[#FF3008] px-3 py-2.5 text-sm font-extrabold text-white transition hover:bg-[#e32906]">Apply fix</button><button type="button" data-dismiss="${esc(item.gap_id)}" class="rounded-lg border border-[#ded7d3] bg-white px-4 py-2.5 text-sm font-bold text-[#655a55] hover:bg-[#f7f4f2]">Dismiss</button></div>
+        </article>`;
+      }).join('');
+      container.innerHTML = `<section class="rounded-xl border border-[#eee9e7] bg-[#f8f7f6] p-4"><div class="mb-2 flex items-center justify-between gap-2"><p class="text-xs font-extrabold uppercase tracking-wider text-[#766d69]">Summary</p><button id="copy-summary" type="button" class="rounded-lg border border-[#ded7d3] bg-white px-3 py-1.5 text-xs font-bold text-[#5C0000] hover:border-[#FF3008]">Copy summary</button></div><p class="text-base leading-relaxed text-[#342d2a]">${summary}</p><p id="copy-confirmation" class="mt-2 hidden text-xs font-bold text-emerald-700">Copied</p></section>${cards || '<p class="rounded-xl bg-[#f8f7f6] p-4 text-sm text-[#766d69]">All issue cards are dismissed.</p>'}`;
+      const copyButton = document.getElementById('copy-summary');
+      copyButton?.addEventListener('click', async () => {
+        const text = [explanation.summary || '', ...items.flatMap(item => {
+          const gap = schedule.gaps.find(entry => entry.gap_id === item.gap_id);
+          return [gapTitle(gap), `Suggested action: ${item.suggested_action || ''}`];
+        })].filter(Boolean).join('\n\n');
+        try {
+          await navigator.clipboard.writeText(text);
+          const confirmation = document.getElementById('copy-confirmation'); confirmation.classList.remove('hidden');
+          clearTimeout(copiedTimer); copiedTimer = setTimeout(() => confirmation?.classList.add('hidden'), 2000);
+        } catch (error) { showToast('Clipboard access is unavailable in this browser.'); }
+      });
+      container.querySelectorAll('[data-apply-fix]').forEach(button => button.addEventListener('click', () => applyFix(button.dataset.applyFix)));
+      container.querySelectorAll('[data-dismiss]').forEach(button => button.addEventListener('click', () => dismissGap(button.dataset.dismiss)));
+      container.querySelectorAll('[data-gap-card]').forEach(card => {
+        card.addEventListener('mouseenter', () => highlightGap(card.dataset.gapCard, true));
+        card.addEventListener('mouseleave', () => highlightGap(card.dataset.gapCard, false));
+      });
+      const dismissedCount = dismissedGapIds.size;
+      footer.classList.toggle('hidden', !dismissedCount);
+      footer.innerHTML = dismissedCount ? `<button id="restore-dismissed" class="text-sm font-bold text-[#a52b10] underline decoration-dotted underline-offset-4 hover:text-[#5C0000]">Dismissed (${dismissedCount}) · Restore</button>` : '';
+      document.getElementById('restore-dismissed')?.addEventListener('click', () => { dismissedGapIds.clear(); renderInsights(explanation, schedule); });
+    }
+    function dismissGap(gapId) {
+      const card = document.querySelector(`[data-gap-card="${CSS.escape(gapId)}"]`);
+      if (!card) return;
+      card.classList.add('is-dismissing');
+      setTimeout(() => { dismissedGapIds.add(gapId); renderInsights(pageData.explanation, pageData.schedule); }, 180);
+    }
+    function showToast(message) {
+      const toast = document.getElementById('toast'); toast.textContent = message;
+      toast.classList.remove('opacity-0', 'translate-y-3'); toast.classList.add('opacity-100', 'translate-y-0');
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.classList.add('opacity-0', 'translate-y-3'); toast.classList.remove('opacity-100', 'translate-y-0'); }, 2600);
+    }
+    function applyFix(gapId) {
+      const gap = pageData?.schedule.gaps.find(item => item.gap_id === gapId);
+      const explanation = pageData?.explanation.gap_explanations.find(item => item.gap_id === gapId);
+      const suggestion = (explanation?.suggested_action || '').toLowerCase();
+      const namedEmployee = pageData?.employees.find(person => suggestion.includes(person.name.toLowerCase()));
+      if (gap && namedEmployee) {
+        sendUpdate(`${namedEmployee.name} will cover ${gap.day} ${gap.shift} ${gap.role}`);
+      } else {
+        showToast('Pick someone to cover this gap');
+        document.getElementById('update-input').focus();
+      }
+    }
+    function renderChat() {
+      const container = document.getElementById('chat-messages');
+      const messages = chatMessages.slice(-6).map(message => {
+        const isUser = message.role === 'user';
+        const actionChip = message.understood ? `<span class="rounded-full border border-[#ded7d3] bg-white px-2 py-0.5 text-[10px] font-semibold text-[#625853]">Understood as: ${esc(message.understood)}</span>` : '';
+        const sourceChip = message.source ? `<span class="rounded-full ${message.source === 'ai' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'} px-2 py-0.5 text-[10px] font-extrabold">${message.source === 'ai' ? 'AI' : 'Keyword'}</span>` : '';
+        return `<div class="flex ${isUser ? 'justify-end' : 'justify-start'}"><div class="flex max-w-[90%] flex-col ${isUser ? 'items-end' : 'items-start'} gap-1"><div class="rounded-2xl ${isUser ? 'rounded-br-md bg-[#5C0000] text-white' : 'rounded-bl-md bg-[#f2efed] text-[#342d2a]'} px-3.5 py-2 text-sm leading-relaxed">${esc(message.text)}</div>${!isUser && (actionChip || sourceChip) ? `<div class="flex flex-wrap gap-1.5">${actionChip}${sourceChip}</div>` : ''}</div></div>`;
+      }).join('');
+      const typing = document.getElementById('typing-indicator');
+      container.innerHTML = messages + (typing?.outerHTML || '');
+      container.scrollTop = container.scrollHeight;
+    }
+    function understoodAs(parsed) {
+      if (!parsed || !['callout', 'cover'].includes(parsed.type) || !parsed.employee) return '';
+      const dayShift = [parsed.day, parsed.shift].filter(Boolean).join(' ');
+      const details = [dayShift, parsed.role].filter(Boolean).join(' ');
+      return parsed.type === 'callout'
+        ? `${parsed.employee} called out${details ? `, ${details}` : ''}`
+        : `${parsed.employee} will cover${details ? ` ${details}` : ''}`;
+    }
+    async function refreshAiMode() {
+      const badge = document.getElementById('ai-mode-badge');
+      try {
+        const response = await fetch('/api/health');
+        if (!response.ok) throw new Error('health check failed');
+        const health = await response.json();
+        if (health.ai_available) {
+          badge.textContent = 'AI mode';
+          badge.className = 'rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700';
+        } else {
+          badge.textContent = 'Offline mode (keyword)';
+          badge.className = 'rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600';
+        }
+      } catch (error) {
+        badge.textContent = 'Offline mode (keyword)';
+        badge.className = 'rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600';
+      }
+    }
+    function setTyping(isTyping) {
+      const container = document.getElementById('chat-messages');
+      let indicator = document.getElementById('typing-indicator');
+      if (isTyping && !indicator) {
+        indicator = document.createElement('div'); indicator.id = 'typing-indicator'; indicator.className = 'flex justify-start';
+        indicator.innerHTML = '<div class="rounded-2xl rounded-bl-md bg-[#f2efed] px-3.5 py-2 text-sm font-semibold text-[#766d69]">BonApp is updating<span class="inline-block w-5 animate-pulse">…</span></div>';
+        container.appendChild(indicator);
+      } else if (!isTyping && indicator) indicator.remove();
+      container.scrollTop = container.scrollHeight;
+    }
+    async function refreshFromData(data, flash = false) {
+      const before = pageData?.schedule ? cellSignatures(pageData.schedule) : null;
+      pageData = data;
+      const changed = new Set();
+      if (flash && before) {
+        const after = cellSignatures(data.schedule);
+        for (const [cell, values] of after) if (JSON.stringify(values) !== JSON.stringify(before.get(cell))) changed.add(cell);
+      }
+      renderStats(data.schedule);
+      renderGrid(data.schedule, changed);
+      renderInsights(data.explanation, data.schedule);
+    }
+    async function sendUpdate(message) {
+      const value = message.trim();
+      if (!value) return;
+      if (pendingApprovalId) {
+        chatMessages.push({ role: 'assistant', text: 'Please approve or reject the pending change before sending another update.' });
+        renderChat(); return;
+      }
+      chatMessages.push({ role: 'user', text: value });
+      renderChat();
+      document.getElementById('update-input').value = '';
+      document.getElementById('send-update').disabled = true;
+      setTyping(true);
+      try {
+        const response = await fetch('/api/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: value }) });
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        const result = await response.json();
+        chatMessages.push({ role: 'assistant', text: result.reply, understood: understoodAs(result.parsed), source: result.source });
+        if (result.needs_manager_approval && result.change?.id) {
+          pendingApprovalId = result.change.id;
+          document.getElementById('approval-reason').textContent = result.reason || '';
+          document.getElementById('approval-banner').classList.remove('hidden');
+        } else if (result.change) {
+          document.getElementById('approval-banner').classList.add('hidden');
+          await refreshFromData({ schedule: result.schedule, explanation: result.explanation, employees: pageData.employees }, true);
+        }
+      } catch (error) {
+        chatMessages.push({ role: 'assistant', text: `Sorry, BonApp couldn't process that update right now. Please try again. (${error.message})` });
+      } finally {
+        setTyping(false); renderChat(); document.getElementById('send-update').disabled = false;
+      }
+    }
+    async function resolveApproval(approve) {
+      if (!pendingApprovalId) return;
+      document.getElementById('approve-change').disabled = true;
+      document.getElementById('reject-change').disabled = true;
+      try {
+        const response = await fetch('/api/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ change_id: pendingApprovalId, approve }) });
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        const result = await response.json();
+        pendingApprovalId = null;
+        document.getElementById('approval-banner').classList.add('hidden');
+        chatMessages.push({ role: 'assistant', text: result.reply });
+        await refreshFromData({ schedule: result.schedule, explanation: result.explanation, employees: pageData.employees }, approve && Boolean(result.change));
+      } catch (error) {
+        chatMessages.push({ role: 'assistant', text: `I couldn't resolve that approval. ${error.message}` });
+      } finally {
+        document.getElementById('approve-change').disabled = false;
+        document.getElementById('reject-change').disabled = false;
+        renderChat();
+      }
+    }
+    async function resetDemo() {
+      try {
+        const response = await fetch('/api/reset', { method: 'POST' });
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        const data = await response.json();
+        pendingApprovalId = null;
+        document.getElementById('approval-banner').classList.add('hidden');
+        chatMessages = [{ role: 'assistant', text: 'Demo schedule reset to its original state.' }];
+        await refreshFromData(data, true);
+        renderChat();
+      } catch (error) {
+        showToast(`Could not reset demo: ${error.message}`);
+      }
+    }
+    function openDrawer(employeeId) {
+      const employee = pageData.employees.find(person => person.employee_id === employeeId);
+      if (!employee) return;
+      const shifts = pageData.schedule.assignments.filter(item => item.employee_id === employeeId);
+      const hours = shifts.reduce((total, item) => total + item.hours, 0);
+      const percent = employee.max_weekly_hours ? Math.min(hours / employee.max_weekly_hours * 100, 100) : 0;
+      document.getElementById('drawer-name').textContent = employee.name;
+      document.getElementById('drawer-content').innerHTML = `
+        <section><h3 class="mb-3 text-sm font-bold uppercase tracking-wider text-[#918782]">Roles</h3><div class="flex flex-wrap gap-2">${employee.roles.map(role => `<span class="role-${esc(role)} role-pill rounded-full px-3 py-1.5 text-sm font-bold capitalize">${esc(role)}</span>`).join('')}</div></section>
+        <section class="grid grid-cols-2 gap-3"><div class="rounded-xl bg-[#f7f5f4] p-4"><p class="text-xs font-bold uppercase tracking-wide text-[#918782]">Hourly wage</p><p class="mt-2 text-xl font-extrabold">${money(employee.hourly_wage)}<span class="text-sm font-semibold text-[#766d69]"> / hr</span></p></div><div class="rounded-xl bg-[#f7f5f4] p-4"><p class="text-xs font-bold uppercase tracking-wide text-[#918782]">Weekly hours</p><p class="mt-2 text-xl font-extrabold">${hours}<span class="text-sm font-semibold text-[#766d69]"> / ${employee.max_weekly_hours} hr</span></p></div></section>
+        <section><div class="mb-2 flex justify-between text-sm"><h3 class="font-bold">Weekly hour limit</h3><span class="font-bold text-[#766d69]">${Math.round(hours / employee.max_weekly_hours * 100)}%</span></div><div class="progress-track"><div class="progress-fill ${hours / employee.max_weekly_hours > .9 ? 'over90' : ''}" style="width:${percent}%"></div></div></section>
+        <section><div class="mb-3 flex items-center justify-between"><h3 class="text-lg font-extrabold">Scheduled shifts</h3><span class="rounded-full bg-[#f4f1ef] px-3 py-1 text-xs font-bold text-[#766d69]">${shifts.length} shifts</span></div><div class="space-y-2">${shifts.length ? shifts.map(item => `<div class="flex items-center justify-between gap-3 rounded-xl border border-[#eee9e7] p-3"><div><p class="font-bold">${esc(item.day)} <span class="capitalize">${esc(item.shift)}</span></p><p class="mt-1 text-sm capitalize text-[#766d69]">${esc(item.role)} · ${esc(item.start)}–${esc(item.end)}</p></div><span class="text-sm font-bold text-[#5C0000]">${item.hours} hr</span></div>`).join('') : '<p class="rounded-xl bg-[#f7f5f4] p-4 text-sm text-[#766d69]">No shifts scheduled.</p>'}</div></section>`;
+      setDrawer(true);
+    }
+    function setDrawer(open) {
+      const drawer = document.getElementById('employee-drawer');
+      const backdrop = document.getElementById('drawer-backdrop');
+      drawer.classList.toggle('open', open); backdrop.classList.toggle('open', open);
+      drawer.setAttribute('aria-hidden', String(!open)); backdrop.setAttribute('aria-hidden', String(!open));
+      document.body.style.overflow = open ? 'hidden' : '';
+    }
+    function validateSchedulePayload(data) {
+      const schedule = data?.schedule;
+      const explanation = data?.explanation;
+      const missing = [];
+      if (!schedule || !Array.isArray(schedule.assignments)) missing.push('schedule.assignments');
+      if (!schedule || !Array.isArray(schedule.gaps)) missing.push('schedule.gaps');
+      if (!schedule || !Number.isFinite(Number(schedule.total_cost))) missing.push('schedule.total_cost');
+      if (!schedule || !Number.isFinite(Number(schedule.coverage_rate))) missing.push('schedule.coverage_rate');
+      if (!schedule || typeof schedule.status !== 'string') missing.push('schedule.status');
+      if (!explanation || !Array.isArray(explanation.gap_explanations)) missing.push('explanation.gap_explanations');
+      if (!Array.isArray(data?.employees)) missing.push('employees');
+      if (missing.length) throw new Error(`API response missing required fields: ${missing.join(', ')}`);
+    }
+    async function init() {
+      const status = document.getElementById('status-chip');
+      const loadError = document.getElementById('load-error');
+      try {
+        renderLegend();
+        refreshAiMode();
+        const response = await fetch('/api/schedule');
+        if (!response.ok) throw new Error(`GET /api/schedule failed (${response.status} ${response.statusText})`);
+        const data = await response.json();
+        validateSchedulePayload(data);
+        pageData = data;
+        renderStats(pageData.schedule);
+        renderGrid(pageData.schedule);
+        renderInsights(pageData.explanation, pageData.schedule);
+        loadError.textContent = '';
+        loadError.classList.add('hidden');
+      } catch (error) {
+        console.error('Schedule load failed:', error);
+        status.textContent = 'Schedule unavailable';
+        status.className = 'rounded-full border border-red-300 bg-red-50 px-4 py-2 text-sm font-bold text-red-800';
+        loadError.textContent = `Could not load schedule: ${error?.message || String(error)}`;
+        loadError.classList.remove('hidden');
+      }
+    }
+    document.getElementById('update-form').addEventListener('submit', event => { event.preventDefault(); sendUpdate(document.getElementById('update-input').value); });
+    document.querySelectorAll('.example-chip').forEach(button => button.addEventListener('click', () => { document.getElementById('update-input').value = button.textContent; sendUpdate(button.textContent); }));
+    document.getElementById('approve-change').addEventListener('click', () => resolveApproval(true));
+    document.getElementById('reject-change').addEventListener('click', () => resolveApproval(false));
+    document.getElementById('reset-demo').addEventListener('click', resetDemo);
+    document.getElementById('drawer-close').addEventListener('click', () => setDrawer(false));
+    document.getElementById('drawer-backdrop').addEventListener('click', () => setDrawer(false));
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') setDrawer(false); });
+    init();
+  </script>
+</body>
+</html>
