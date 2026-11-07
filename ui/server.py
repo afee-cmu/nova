@@ -11,13 +11,18 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from typing import Optional
+
 from pydantic import BaseModel
 
+from . import expo_bridge, notes_bridge
+from .expo_bridge import ExpoError
 from .llm import parse_message
 from .mock_data import EMPLOYEES as MOCK_EMPLOYEES, SCHEDULE as MOCK_SCHEDULE
+from .notes_bridge import NotesError
 from .solver_bridge import (TEMPLATE_PATH, WorkbookValidationError, build_explanation,
-                            initialize_demo, normalize_mock, propose_replan,
-                            solve_workbook)
+                            initialize_demo, normalize, normalize_mock, propose_replan,
+                            solve, solve_workbook)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -36,6 +41,25 @@ class UpdateRequest(BaseModel):
 class ApprovalRequest(BaseModel):
     change_id: str
     approve: bool
+
+
+class NotesRequest(BaseModel):
+    setup_text: str
+    availability_text: str
+
+
+class MessageRequest(BaseModel):
+    message: str
+
+
+class TextRequest(BaseModel):
+    text: str
+
+
+class TicketRequest(BaseModel):
+    now: str
+    image: Optional[str] = None   # data URL from the camera or a photo upload
+    text: Optional[str] = None    # pasted ticket text
 
 
 current_schedule = normalize_mock()
@@ -59,6 +83,7 @@ def initialize_solver_cache():
     _BOOT_EMPLOYEES = deepcopy(current_employees)
     _BOOT_SOLVER_CONTEXT = deepcopy(current_solver_context)
     pending_changes.clear()
+    expo_bridge.load_saved_kitchen()
 
 
 def _response(reply, change=None, approval=False, reason=None, source=None, parsed=None):
@@ -253,6 +278,158 @@ async def upload_workbook(request: Request):
                 temporary_path.unlink(missing_ok=True)
             except OSError:
                 logger.exception("Could not remove temporary workbook upload")
+
+
+# ---------------------------------------------------------------------------
+# Notes path: plain-English notes -> AI reading -> manager review -> same schedule pipeline
+# ---------------------------------------------------------------------------
+notes_draft = None
+
+
+def _notes_error(error):
+    return JSONResponse(status_code=422, content={"ok": False, "error": str(error)})
+
+
+@app.get("/api/notes/samples")
+def notes_samples():
+    return notes_bridge.samples()
+
+
+@app.post("/api/notes/extract")
+def notes_extract(request: NotesRequest):
+    global notes_draft
+    try:
+        notes_draft = notes_bridge.extract(request.setup_text, request.availability_text)
+    except NotesError as error:
+        return _notes_error(error)
+    except Exception:
+        logger.exception("Notes extraction failed")
+        return JSONResponse(status_code=500, content={"ok": False, "error": "The notes could not be processed."})
+    return {"ok": True, "understood": notes_bridge.view(notes_draft)}
+
+
+@app.post("/api/notes/correct")
+def notes_correct(request: MessageRequest):
+    if notes_draft is None:
+        return _notes_error("Read your notes first.")
+    try:
+        changes = notes_bridge.correct(notes_draft, request.message)
+    except NotesError as error:
+        return _notes_error(error)
+    return {"ok": True, "changes": changes, "understood": notes_bridge.view(notes_draft)}
+
+
+@app.post("/api/notes/undo")
+def notes_undo():
+    if notes_draft is None:
+        return _notes_error("Read your notes first.")
+    undone = notes_bridge.undo(notes_draft)
+    return {"ok": True, "undone": undone, "understood": notes_bridge.view(notes_draft)}
+
+
+@app.post("/api/notes/solve")
+def notes_solve():
+    """Build the schedule from the reviewed notes; afterwards everything works like an upload."""
+    global current_schedule, current_explanation, current_employees, current_solver_context
+    if notes_draft is None:
+        return _notes_error("Read your notes first.")
+    from time import perf_counter
+    started = perf_counter()
+    try:
+        inputs = notes_bridge.to_inputs(notes_draft)
+        result = solve(inputs)
+        new_schedule = normalize(result, inputs)
+    except Exception:
+        logger.exception("Notes solve failed")
+        return JSONResponse(status_code=500, content={"ok": False, "error": "The schedule could not be built."})
+    new_schedule["data_source"] = "notes"
+    current_schedule = new_schedule
+    current_explanation = build_explanation(new_schedule, inputs)
+    current_employees = deepcopy(new_schedule["employees"])
+    current_solver_context = inputs
+    pending_changes.clear()
+    return {"ok": True, "schedule": deepcopy(current_schedule), "explanation": deepcopy(current_explanation),
+            "employees": deepcopy(current_employees), "warnings": list(current_schedule.get("warnings", [])),
+            "solve_seconds": perf_counter() - started}
+
+
+# ---------------------------------------------------------------------------
+# Expo: one-time kitchen setup, tickets from camera/text, live fire queue
+# ---------------------------------------------------------------------------
+def _expo(fn, *args, **kwargs):
+    """Run an expo action and return its result plus the current expo state, or a friendly error."""
+    try:
+        result = fn(*args, **kwargs)
+    except ExpoError as error:
+        return JSONResponse(status_code=422, content={"ok": False, "error": str(error)})
+    except Exception:
+        logger.exception("Expo action failed")
+        return JSONResponse(status_code=500, content={"ok": False, "error": "That couldn't be processed."})
+    return {"ok": True, "result": result, **expo_bridge.status()}
+
+
+@app.get("/api/expo/state")
+def expo_state():
+    return {"ok": True, **expo_bridge.status(), "samples": expo_bridge.samples()}
+
+
+@app.post("/api/kitchen/draft")
+def kitchen_draft(request: TextRequest):
+    return _expo(expo_bridge.draft_kitchen, request.text)
+
+
+@app.post("/api/kitchen/correct")
+def kitchen_correct(request: MessageRequest):
+    return _expo(expo_bridge.correct_kitchen, request.message)
+
+
+@app.post("/api/kitchen/undo")
+def kitchen_undo():
+    return _expo(expo_bridge.undo_kitchen)
+
+
+@app.post("/api/kitchen/save")
+def kitchen_save():
+    return _expo(expo_bridge.save_kitchen)
+
+
+@app.post("/api/kitchen/edit")
+def kitchen_edit():
+    return _expo(expo_bridge.edit_kitchen)
+
+
+@app.post("/api/tickets")
+def tickets_add(request: TicketRequest):
+    if not re.fullmatch(r"\d{1,2}:\d{2}", request.now or ""):
+        return JSONResponse(status_code=422, content={"ok": False, "error": "now must be HH:MM"})
+    return _expo(expo_bridge.add_tickets, request.now, image=request.image, text=request.text)
+
+
+@app.post("/api/orders/correct")
+def orders_correct(request: MessageRequest):
+    return _expo(expo_bridge.correct_orders, request.message)
+
+
+@app.post("/api/orders/undo")
+def orders_undo():
+    return _expo(expo_bridge.undo_orders)
+
+
+@app.post("/api/orders/{order_id}/done")
+def orders_done(order_id: str):
+    return _expo(expo_bridge.complete_order, order_id)
+
+
+@app.post("/api/orders/clear")
+def orders_clear():
+    return _expo(expo_bridge.clear_orders)
+
+
+@app.get("/api/expo/plan")
+def expo_plan(now: str):
+    if not re.fullmatch(r"\d{1,2}:\d{2}", now or ""):
+        return JSONResponse(status_code=422, content={"ok": False, "error": "now must be HH:MM"})
+    return {"ok": True, "plan": expo_bridge.plan(now)}
 
 
 @app.post("/api/reset")

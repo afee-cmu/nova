@@ -49,14 +49,43 @@
         <div><p class="text-xs font-bold uppercase tracking-[.18em] text-[#8d807b]">Restaurant operations</p><h1 class="text-3xl font-extrabold tracking-tight text-[#5C0000] md:text-4xl">BonApp</h1></div>
       </div>
       <div id="load-error" class="hidden max-w-xl rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-800" role="alert"></div>
-      <div class="flex flex-wrap items-center gap-3"><button id="show-data-in" class="rounded-xl border border-[#ffd2c8] bg-[#fff7f5] px-4 py-2.5 text-sm font-bold text-[#a52b10] shadow-sm hover:border-[#FF3008]">Data In</button><button id="reset-demo" class="rounded-xl border border-[#e2d9d5] bg-white px-4 py-2.5 text-sm font-bold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Reset demo</button><div id="status-chip" class="rounded-full border border-[#ffd2c8] bg-white px-4 py-2 text-sm font-bold text-[#5C0000]">Choose data</div><div id="data-source-badge" class="rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600">No schedule yet</div><div id="ai-mode-badge" class="rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600">Checking AI mode…</div></div>
+      <div class="flex flex-wrap items-center gap-3"><button id="show-data-in" class="rounded-xl border border-[#ffd2c8] bg-[#fff7f5] px-4 py-2.5 text-sm font-bold text-[#a52b10] shadow-sm hover:border-[#FF3008]">Data In</button><button id="show-expo" class="rounded-xl border border-[#e2d9d5] bg-white px-4 py-2.5 text-sm font-bold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Rush Hour</button><button id="reset-demo" class="rounded-xl border border-[#e2d9d5] bg-white px-4 py-2.5 text-sm font-bold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Reset demo</button><div id="status-chip" class="rounded-full border border-[#ffd2c8] bg-white px-4 py-2 text-sm font-bold text-[#5C0000]">Choose data</div><div id="data-source-badge" class="rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600">No schedule yet</div><div id="ai-mode-badge" class="rounded-full border border-gray-200 bg-gray-100 px-4 py-2 text-sm font-bold text-gray-600">Checking AI mode…</div></div>
     </header>
 
     <section id="data-in-view" class="mx-auto max-w-4xl">
       <div class="rounded-3xl border border-[#eee9e7] bg-white p-6 shadow-sm md:p-10">
         <p class="text-sm font-extrabold uppercase tracking-[.18em] text-[#FF3008]">Data In</p>
-        <h2 class="mt-2 text-3xl font-extrabold tracking-tight text-[#5C0000] md:text-4xl">Start with your team workbook</h2>
-        <p class="mt-3 max-w-2xl text-lg leading-relaxed text-[#766d69]">Upload the BonApp scheduling workbook to validate your roster, availability, tasks, and rush windows.</p>
+        <h2 class="mt-2 text-3xl font-extrabold tracking-tight text-[#5C0000] md:text-4xl">Start with your team</h2>
+        <p class="mt-3 max-w-2xl text-lg leading-relaxed text-[#766d69]">Paste the notes you already have and BonApp will read them, or upload the scheduling workbook.</p>
+        <div class="mt-6 inline-flex rounded-xl border border-[#eadfdb] bg-[#faf7f6] p-1" role="tablist" aria-label="How to add your team">
+          <button id="mode-notes" type="button" role="tab" class="mode-tab rounded-lg px-4 py-2 text-sm font-extrabold">Paste notes</button>
+          <button id="mode-upload" type="button" role="tab" class="mode-tab rounded-lg px-4 py-2 text-sm font-extrabold">Upload workbook</button>
+        </div>
+        <div id="notes-panel" class="mt-6">
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="block"><span class="text-sm font-extrabold text-[#5C0000]">How your week runs</span><span class="block text-xs text-[#766d69]">Rush times, how many people each needs, base pay</span>
+              <textarea id="notes-setup" rows="9" class="mt-2 w-full rounded-xl border border-[#ddd5d1] bg-[#faf9f8] p-3 text-sm outline-none focus:border-[#FF3008]" placeholder="Weekday lunch is 11 to 2, one cook and one person on register..."></textarea></label>
+            <label class="block"><span class="text-sm font-extrabold text-[#5C0000]">Your staff and availability</span><span class="block text-xs text-[#766d69]">Paste from your group chat, notes, anything</span>
+              <textarea id="notes-availability" rows="9" class="mt-2 w-full rounded-xl border border-[#ddd5d1] bg-[#faf9f8] p-3 text-sm outline-none focus:border-[#FF3008]" placeholder="Alex - line cook, $19, nights only Mon-Wed..."></textarea></label>
+          </div>
+          <button id="notes-load-sample" type="button" class="mt-3 font-bold text-[#a52b10] underline decoration-dotted underline-offset-4">Load sample notes</button>
+          <div id="notes-error" class="mt-4 hidden rounded-2xl border border-red-200 bg-red-50 p-4 font-semibold text-red-900" role="alert"></div>
+          <button id="notes-read" type="button" class="mt-5 w-full rounded-xl bg-[#FF3008] px-5 py-4 text-lg font-extrabold text-white shadow-sm hover:bg-[#e92b07] disabled:cursor-wait disabled:opacity-60">Read my notes</button>
+          <div id="notes-review" class="mt-8 hidden">
+            <div class="flex flex-wrap items-end justify-between gap-2"><div><p class="text-xs font-bold uppercase tracking-[.16em] text-[#FF3008]">Review</p><h3 class="text-2xl font-extrabold text-[#5C0000]">Here's what I understood</h3></div><p id="notes-count" class="text-sm font-semibold text-[#766d69]"></p></div>
+            <div id="notes-roles" class="mt-4 flex flex-wrap gap-2"></div>
+            <details class="mt-3 rounded-xl border border-[#eee9e7] p-3"><summary id="notes-windows-title" class="cursor-pointer text-sm font-bold text-[#5C0000]">Rush windows</summary><div id="notes-windows" class="mt-3 grid gap-2 text-sm sm:grid-cols-2"></div></details>
+            <div id="notes-people" class="mt-4 grid gap-3"></div>
+            <details open class="mt-4 rounded-xl border border-[#f1d8a8] bg-[#fffaf0] p-3"><summary class="cursor-pointer text-sm font-bold text-[#805400]">How I read your notes</summary><ul id="notes-assumptions" class="mt-2 list-disc space-y-1 pl-5 text-sm text-[#665641]"></ul></details>
+            <div class="mt-5 rounded-2xl border border-[#ffd2c8] bg-[#fff9f7] p-4">
+              <p class="font-extrabold text-[#5C0000]">Anything wrong? Just say so.</p>
+              <form id="notes-correct-form" class="mt-2 flex gap-2"><input id="notes-correct-input" autocomplete="off" class="min-w-0 flex-1 rounded-xl border border-[#ddd5d1] bg-white px-4 py-3 text-sm outline-none focus:border-[#FF3008]" placeholder='e.g. "Sam said Thursday dinner, not lunch"'><button id="notes-correct-send" class="rounded-xl bg-[#5C0000] px-5 py-3 text-sm font-extrabold text-white disabled:opacity-60">Fix</button><button id="notes-undo" type="button" class="rounded-xl border border-[#ddd5d1] bg-white px-4 py-3 text-sm font-bold text-[#5C0000] disabled:opacity-40">Undo</button></form>
+              <div id="notes-changes" class="mt-3 space-y-1 text-sm"></div>
+            </div>
+            <button id="notes-build" type="button" class="mt-6 w-full rounded-xl bg-[#FF3008] px-5 py-4 text-lg font-extrabold text-white shadow-sm hover:bg-[#e92b07] disabled:cursor-wait disabled:opacity-60">Looks right: build schedule</button>
+          </div>
+        </div>
+        <div id="upload-panel" class="hidden">
         <div id="drop-zone" class="mt-7 rounded-2xl border-2 border-dashed border-[#e7c3ba] bg-[#fff9f7] px-6 py-9 text-center transition hover:border-[#FF3008] hover:bg-[#fff4f0]">
           <div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-white text-3xl text-[#FF3008] shadow-sm">↑</div>
           <p class="mt-4 text-xl font-extrabold text-[#5C0000]">Drop your .xlsx workbook here</p>
@@ -72,6 +101,7 @@
           <ol id="upload-steps" class="mt-4 grid gap-2 text-sm font-semibold text-[#8d807b] sm:grid-cols-2"><li data-step="0">1. Reading file</li><li data-step="1">2. Validating</li><li data-step="2">3. Solving</li><li data-step="3">4. Preparing insights</li></ol>
         </div>
         <div class="mt-7 grid gap-3 sm:grid-cols-2"><button id="generate-schedule" type="button" disabled class="rounded-xl bg-[#FF3008] px-5 py-4 text-lg font-extrabold text-white shadow-sm transition hover:bg-[#e92b07] disabled:cursor-not-allowed disabled:opacity-40">Generate schedule</button><button id="use-demo" type="button" class="rounded-xl border border-[#ded5d1] bg-white px-5 py-4 text-lg font-extrabold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Use demo data</button></div>
+        </div>
       </div>
     </section>
 
@@ -101,6 +131,53 @@
     </div>
     <p id="error-message" class="mt-5 hidden rounded-xl bg-red-50 p-4 text-sm font-semibold text-red-800"></p>
     </div>
+
+    <section id="expo-view" class="hidden">
+      <div class="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div class="space-y-5">
+          <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm md:p-6">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div><p class="text-xs font-bold uppercase tracking-[.16em] text-[#FF3008]">Rush Hour</p><h2 class="text-2xl font-extrabold text-[#5C0000]">Capture tickets as they come in</h2></div>
+              <div class="flex items-center gap-2 rounded-xl border border-[#eee9e7] bg-[#faf9f8] px-3 py-2 text-sm font-bold text-[#5C0000]">Clock <input id="expo-clock" type="time" class="rounded-md border border-[#ddd5d1] bg-white px-2 py-1 disabled:opacity-60"><label class="flex items-center gap-1 font-semibold text-[#766d69]"><input id="clock-live" type="checkbox" checked> Live</label></div>
+            </div>
+            <div id="capture-locked" class="mt-4 hidden rounded-xl border border-[#f1d8a8] bg-[#fffaf0] p-3 text-sm font-semibold text-[#805400]">Set up your kitchen first (one time, on the right). Then point the camera at each ticket or tablet as it comes in.</div>
+            <div class="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_240px]">
+              <div class="relative aspect-[4/3] overflow-hidden rounded-xl bg-[#1d1716]">
+                <video id="camera-video" playsinline muted class="hidden h-full w-full object-contain"></video>
+                <div id="camera-placeholder" class="absolute inset-0 grid place-items-center p-6 text-center text-sm font-semibold text-white/80">Start the camera, hold a ticket or tablet in view, and tap Snap.</div>
+                <div id="camera-flash" class="pointer-events-none absolute inset-0 bg-white opacity-0 transition-opacity duration-150"></div>
+              </div>
+              <div class="flex flex-col gap-2">
+                <button id="camera-start" type="button" class="rounded-xl border border-[#e2d9d5] bg-white px-4 py-3 font-bold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Start camera</button>
+                <select id="camera-select" class="hidden rounded-xl border border-[#e2d9d5] bg-white px-3 py-2 text-sm" aria-label="Choose camera"></select>
+                <button id="camera-snap" type="button" disabled class="rounded-xl bg-[#FF3008] px-4 py-5 text-lg font-extrabold text-white shadow-sm hover:bg-[#e92b07] disabled:cursor-not-allowed disabled:opacity-40">Snap ticket<span class="block text-xs font-semibold opacity-80">or press Space</span></button>
+                <label class="cursor-pointer rounded-xl border border-[#e2d9d5] bg-white px-4 py-3 text-center font-bold text-[#5C0000] shadow-sm hover:border-[#FF3008]">Take or upload photo<input id="photo-input" type="file" accept="image/*" capture="environment" class="hidden"></label>
+                <p id="camera-note" class="text-xs leading-relaxed text-[#766d69]">On a phone, "Take or upload photo" opens the camera directly.</p>
+              </div>
+            </div>
+            <details class="mt-4 rounded-xl border border-[#eee9e7] p-3"><summary class="cursor-pointer text-sm font-bold text-[#5C0000]">Paste ticket text instead</summary>
+              <textarea id="ticket-text" rows="6" class="mt-3 w-full rounded-xl border border-[#ddd5d1] bg-[#faf9f8] p-3 font-mono text-xs outline-none focus:border-[#FF3008]" placeholder="DOORDASH Order #1042 ..."></textarea>
+              <div class="mt-2 flex flex-wrap gap-2"><button id="ticket-text-add" type="button" class="rounded-xl bg-[#5C0000] px-4 py-2 text-sm font-extrabold text-white disabled:opacity-60">Add tickets</button><button id="ticket-sample" type="button" class="rounded-xl px-3 py-2 text-sm font-bold text-[#a52b10] underline decoration-dotted underline-offset-4">Load sample tickets</button></div>
+            </details>
+            <div id="capture-feed" class="mt-4 space-y-2" aria-live="polite"></div>
+          </article>
+          <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm md:p-6">
+            <div class="flex flex-wrap items-end justify-between gap-2"><div><p class="text-xs font-bold uppercase tracking-[.16em] text-[#FF3008]">Call it</p><h2 class="text-2xl font-extrabold text-[#5C0000]">Fire queue</h2></div><p id="fire-updated" class="text-xs font-semibold text-[#766d69]"></p></div>
+            <div id="fire-queue" class="mt-4 space-y-2"></div>
+          </article>
+        </div>
+        <div class="space-y-5">
+          <article id="kitchen-card" class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm md:p-6"></article>
+          <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm md:p-6">
+            <div class="flex items-center justify-between gap-2"><h2 class="text-xl font-extrabold text-[#5C0000]">Orders</h2><div class="flex gap-1"><button id="orders-undo" type="button" class="rounded-lg px-2 py-1 text-xs font-bold text-[#5C0000] hover:bg-[#f7f4f2] disabled:opacity-40">Undo</button><button id="orders-clear" type="button" class="rounded-lg px-2 py-1 text-xs font-bold text-[#a52b10] hover:bg-[#fff1ed]">Clear all</button></div></div>
+            <div id="orders-list" class="mt-3 space-y-2"></div>
+            <form id="orders-correct-form" class="mt-3 flex gap-2"><input id="orders-correct-input" autocomplete="off" class="min-w-0 flex-1 rounded-xl border border-[#ddd5d1] bg-[#faf9f8] px-3 py-2 text-sm outline-none focus:border-[#FF3008]" placeholder='Fix an order, e.g. "Grubhub has 2 fries"'><button class="rounded-xl bg-[#5C0000] px-4 py-2 text-sm font-extrabold text-white disabled:opacity-60">Fix</button></form>
+            <div id="orders-changes" class="mt-2 space-y-1 text-sm"></div>
+          </article>
+          <article class="rounded-2xl border border-[#eee9e7] bg-white p-5 shadow-sm md:p-6"><h2 class="text-xl font-extrabold text-[#5C0000]">Stations</h2><div id="station-load" class="mt-3 space-y-3"></div></article>
+        </div>
+      </div>
+    </section>
   </main>
 
   <section id="update-bar" class="fixed inset-x-0 bottom-0 z-30 border-t border-[#e7dfdb] bg-white/95 px-4 py-3 shadow-[0_-8px_30px_#24140f12] backdrop-blur md:px-8">
@@ -168,7 +245,7 @@
       document.getElementById('status-chip').textContent = schedule.status;
       const badge = document.getElementById('data-source-badge');
       const source = schedule.data_source;
-      badge.textContent = source === 'solver' ? 'Real solver' : source === 'upload' ? 'Uploaded data' : 'Mock data';
+      badge.textContent = source === 'solver' ? 'Real solver' : source === 'upload' ? 'Uploaded data' : source === 'notes' ? 'From your notes' : 'Mock data';
       badge.className = `rounded-full border px-4 py-2 text-sm font-bold ${source !== 'mock' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-100 text-gray-600'}`;
       const warnings = schedule.warnings || [];
       const warningPanel = document.getElementById('warnings-panel');
@@ -470,12 +547,14 @@
       if (missing.length) throw new Error(`API response missing required fields: ${missing.join(', ')}`);
     }
     function showDataInView() {
+      leaveExpo();
       document.getElementById('data-in-view').classList.remove('hidden');
       document.getElementById('schedule-view').classList.add('hidden');
       document.getElementById('update-bar').classList.add('hidden');
       document.getElementById('back-to-schedule').classList.toggle('hidden', !generatedThisSession);
     }
     function showScheduleView() {
+      leaveExpo();
       document.getElementById('data-in-view').classList.add('hidden');
       document.getElementById('schedule-view').classList.remove('hidden');
       document.getElementById('update-bar').classList.remove('hidden');
@@ -529,8 +608,364 @@
         clearInterval(timer); loading.classList.add('hidden'); generate.disabled = !selectedWorkbook;
       }
     }
+    // ---------------------------------------------------------------------------
+    // Shared helpers for the notes and expo screens
+    // ---------------------------------------------------------------------------
+    async function postJSON(url, body) {
+      const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+      let data = {};
+      try { data = await response.json(); } catch (error) { /* non-JSON error page */ }
+      if (!response.ok || data.ok === false) throw new Error(data.error || `Request failed (${response.status})`);
+      return data;
+    }
+    function setBusy(button, busy, label) {
+      if (!button) return;
+      if (busy) { button.dataset.label = button.innerHTML; button.innerHTML = label; button.disabled = true; }
+      else { if (button.dataset.label) button.innerHTML = button.dataset.label; button.disabled = false; }
+    }
+    function renderChanges(container, changes) {
+      container.innerHTML = changes.length
+        ? changes.map(line => `<p class="rounded-lg bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-800">✓ ${esc(line)}</p>`).join('')
+        : '<p class="rounded-lg bg-amber-50 px-3 py-1.5 font-semibold text-amber-800">Nothing changed. Try naming the person or item and the shift.</p>';
+    }
+
+    // ---------------------------------------------------------------------------
+    // Data In: notes path
+    // ---------------------------------------------------------------------------
+    function setDataMode(mode) {
+      document.getElementById('notes-panel').classList.toggle('hidden', mode !== 'notes');
+      document.getElementById('upload-panel').classList.toggle('hidden', mode !== 'upload');
+      for (const [id, active] of [['mode-notes', mode === 'notes'], ['mode-upload', mode === 'upload']]) {
+        const tab = document.getElementById(id);
+        tab.setAttribute('aria-selected', String(active));
+        tab.className = `mode-tab rounded-lg px-4 py-2 text-sm font-extrabold ${active ? 'bg-white text-[#5C0000] shadow-sm' : 'text-[#8d807b] hover:text-[#5C0000]'}`;
+      }
+    }
+    function showNotesError(message) {
+      const box = document.getElementById('notes-error');
+      box.textContent = message || ''; box.classList.toggle('hidden', !message);
+    }
+    function renderUnderstood(u, changedNames = new Set()) {
+      document.getElementById('notes-review').classList.remove('hidden');
+      document.getElementById('notes-count').textContent = `${u.employees.length} people · ${u.windows.length} rush windows`;
+      document.getElementById('notes-roles').innerHTML = Object.entries(u.roles).map(([role, rate]) =>
+        `<span class="task-pill rounded-full px-3 py-1 text-sm font-bold" style="${taskStyle(role)}">${esc(role)} · ${money(rate)}/hr default</span>`).join('');
+      document.getElementById('notes-windows-title').textContent = `Rush windows (${u.windows.length})`;
+      document.getElementById('notes-windows').innerHTML = u.windows.map(w =>
+        `<div class="rounded-lg bg-[#faf7f6] px-3 py-2"><span class="font-extrabold text-[#5C0000]">${esc(w.day)} ${esc(w.name)}</span> <span class="text-[#766d69]">${esc(w.start)}–${esc(w.end)}</span><br><span class="text-xs text-[#766d69]">${Object.entries(w.staff).map(([r, n]) => `${n} ${esc(r)}`).join(', ')}</span></div>`).join('');
+      document.getElementById('notes-people').innerHTML = u.employees.map(e => {
+        const roles = e.roles.map(r => `<span class="task-pill rounded-full px-2.5 py-0.5 text-xs font-bold" style="${taskStyle(r.role)}">${esc(r.role)} ${money(r.wage)}${r.default_pay ? ' (default)' : ''}</span>`).join(' ');
+        const caps = [e.min_hours ? `min ${e.min_hours}h` : '', `max ${e.max_hours}h`, e.max_shifts ? `${e.max_shifts} shifts max` : ''].filter(Boolean).join(' · ');
+        const days = DAYS.map(day => {
+          const slot = e.availability.find(a => a.day === day);
+          return `<div class="rounded-lg px-1.5 py-1 text-center ${slot ? 'bg-emerald-50 text-emerald-800' : 'bg-[#f6f3f2] text-[#b5aaa6]'}"><div class="text-[10px] font-extrabold uppercase">${day}</div><div class="text-[11px] font-semibold leading-tight">${slot ? slot.windows.map(esc).join('<br>') : '—'}</div></div>`;
+        }).join('');
+        const flash = changedNames.has(e.name) ? ' schedule-updated' : '';
+        return `<div class="rounded-xl border border-[#eee9e7] p-3${flash}"><div class="flex flex-wrap items-center justify-between gap-2"><p class="font-extrabold text-[#5C0000]">${esc(e.name)}</p><p class="text-xs font-semibold text-[#766d69]">${esc(caps)}</p></div><div class="mt-1 flex flex-wrap gap-1">${roles}</div><div class="mt-2 grid grid-cols-7 gap-1">${days}</div></div>`;
+      }).join('');
+      document.getElementById('notes-assumptions').innerHTML = u.assumptions.map(a => `<li>${esc(a)}</li>`).join('') || '<li>Nothing needed interpreting.</li>';
+      document.getElementById('notes-undo').disabled = !u.can_undo;
+    }
+    async function loadSampleNotes() {
+      try {
+        const response = await fetch('/api/notes/samples'); const data = await response.json();
+        document.getElementById('notes-setup').value = data.setup_text || '';
+        document.getElementById('notes-availability').value = data.availability_text || '';
+      } catch (error) { showNotesError('Could not load the sample notes.'); }
+    }
+    async function readNotes() {
+      const button = document.getElementById('notes-read');
+      showNotesError(''); setBusy(button, true, 'Reading your notes…');
+      try {
+        const data = await postJSON('/api/notes/extract', {
+          setup_text: document.getElementById('notes-setup').value,
+          availability_text: document.getElementById('notes-availability').value });
+        document.getElementById('notes-changes').innerHTML = '';
+        renderUnderstood(data.understood);
+        document.getElementById('notes-review').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (error) { showNotesError(error.message); }
+      finally { setBusy(button, false); }
+    }
+    async function correctNotes(message) {
+      if (!message.trim()) return;
+      const send = document.getElementById('notes-correct-send'); setBusy(send, true, '…');
+      try {
+        const data = await postJSON('/api/notes/correct', { message });
+        renderChanges(document.getElementById('notes-changes'), data.changes);
+        renderUnderstood(data.understood, new Set(data.changes.map(line => line.split(':')[0])));
+        document.getElementById('notes-correct-input').value = '';
+      } catch (error) { document.getElementById('notes-changes').innerHTML = `<p class="rounded-lg bg-red-50 px-3 py-1.5 font-semibold text-red-800">${esc(error.message)}</p>`; }
+      finally { setBusy(send, false); }
+    }
+    async function undoNotes() {
+      try {
+        const data = await postJSON('/api/notes/undo');
+        document.getElementById('notes-changes').innerHTML = data.undone ? '<p class="rounded-lg bg-[#f6f3f2] px-3 py-1.5 font-semibold text-[#5C0000]">Undid the last change.</p>' : '';
+        renderUnderstood(data.understood);
+      } catch (error) { showNotesError(error.message); }
+    }
+    async function buildFromNotes() {
+      const button = document.getElementById('notes-build'); setBusy(button, true, 'Building your schedule…');
+      try {
+        const result = await postJSON('/api/notes/solve');
+        validateSchedulePayload(result);
+        generatedThisSession = true; pendingApprovalId = null; pendingApprovalKind = null; pendingReplanChange = null;
+        document.getElementById('approval-banner').classList.add('hidden'); renderReplanProposal(null);
+        showScheduleView();
+        await refreshFromData(result, false);
+        showToast(`Schedule built from your notes in ${Number(result.solve_seconds || 0).toFixed(1)}s`);
+      } catch (error) { showNotesError(error.message); }
+      finally { setBusy(button, false); }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Expo: kitchen setup, camera capture, live fire queue
+    // ---------------------------------------------------------------------------
+    let expoState = null;
+    let expoSamples = {};
+    let cameraStream = null;
+    let planTimer = null;
+    let expoVisible = false;
+
+    function expoNow() {
+      const live = document.getElementById('clock-live').checked;
+      const input = document.getElementById('expo-clock');
+      if (live || !input.value) { const d = new Date(); input.value = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
+      return input.value;
+    }
+    function showExpoView() {
+      expoVisible = true;
+      ['data-in-view', 'schedule-view', 'update-bar'].forEach(id => document.getElementById(id).classList.add('hidden'));
+      document.getElementById('expo-view').classList.remove('hidden');
+      loadExpoState();
+      clearInterval(planTimer); planTimer = setInterval(refreshPlan, 20000);
+    }
+    function leaveExpo() {
+      expoVisible = false;
+      document.getElementById('expo-view')?.classList.add('hidden');
+      clearInterval(planTimer); planTimer = null;
+      stopCamera();
+    }
+    async function loadExpoState() {
+      try {
+        const response = await fetch('/api/expo/state'); const data = await response.json();
+        expoSamples = data.samples || {};
+        applyExpoState(data);
+      } catch (error) { showToast('Could not load the Rush Hour screen.'); }
+    }
+    function applyExpoState(data) {
+      expoState = data;
+      renderKitchenCard();
+      renderOrders();
+      const ready = Boolean(data.kitchen);
+      document.getElementById('capture-locked').classList.toggle('hidden', ready);
+      document.getElementById('camera-snap').disabled = !(ready && cameraStream);
+      document.getElementById('ticket-text-add').disabled = !ready;
+      document.getElementById('photo-input').disabled = !ready;
+      document.getElementById('orders-undo').disabled = !data.can_undo_orders;
+      refreshPlan();
+    }
+
+    // Kitchen card: setup (draft + corrections) or saved summary
+    function renderKitchenCard() {
+      const card = document.getElementById('kitchen-card');
+      const { kitchen, draft } = expoState;
+      const stationChips = k => Object.entries(k.stations).map(([s, n]) => `<span class="rounded-full bg-[#f6f3f2] px-3 py-1 text-xs font-bold text-[#5C0000]">${esc(s)} · ${n} spot${n === 1 ? '' : 's'}</span>`).join(' ');
+      const menuRows = k => k.menu.map(m => `<tr class="border-t border-[#f1ecea]"><td class="py-1.5 pr-2 font-semibold">${esc(m.name)}</td><td class="pr-2 text-[#766d69]">${esc(m.station)}</td><td class="pr-2 text-right">${m.cook_min} min</td><td class="text-right text-[#766d69]">${m.space > 1 ? `${m.space} spots` : ''}</td></tr>`).join('');
+      if (draft) {
+        card.innerHTML = `<p class="text-xs font-bold uppercase tracking-[.16em] text-[#FF3008]">One-time setup</p><h2 class="text-xl font-extrabold text-[#5C0000]">Check your kitchen</h2>
+          <div class="mt-3 flex flex-wrap gap-1.5">${stationChips(draft)}</div>
+          <table class="mt-3 w-full text-sm"><tbody>${menuRows(draft)}</tbody></table>
+          ${draft.assumptions.length ? `<ul class="mt-3 list-disc space-y-1 pl-5 text-xs text-[#665641]">${draft.assumptions.map(a => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+          <form id="kitchen-correct-form" class="mt-3 flex gap-2"><input id="kitchen-correct-input" autocomplete="off" class="min-w-0 flex-1 rounded-xl border border-[#ddd5d1] bg-[#faf9f8] px-3 py-2 text-sm outline-none focus:border-[#FF3008]" placeholder='e.g. "wings take 14 minutes"'><button class="rounded-xl bg-[#5C0000] px-4 py-2 text-sm font-extrabold text-white">Fix</button><button id="kitchen-undo" type="button" class="rounded-xl border border-[#ddd5d1] px-3 py-2 text-sm font-bold text-[#5C0000] disabled:opacity-40" ${expoState.can_undo_kitchen ? '' : 'disabled'}>Undo</button></form>
+          <div id="kitchen-changes" class="mt-2 space-y-1 text-sm"></div>
+          <button id="kitchen-save" type="button" class="mt-4 w-full rounded-xl bg-[#FF3008] px-4 py-3 font-extrabold text-white hover:bg-[#e92b07]">Looks right: save kitchen</button>`;
+        document.getElementById('kitchen-correct-form').addEventListener('submit', event => { event.preventDefault(); kitchenAction('/api/kitchen/correct', { message: document.getElementById('kitchen-correct-input').value }, true); });
+        document.getElementById('kitchen-undo').addEventListener('click', () => kitchenAction('/api/kitchen/undo'));
+        document.getElementById('kitchen-save').addEventListener('click', () => kitchenAction('/api/kitchen/save').then(() => showToast('Kitchen saved. You won’t need to do this again.')));
+      } else if (kitchen) {
+        card.innerHTML = `<div class="flex items-center justify-between gap-2"><h2 class="text-xl font-extrabold text-[#5C0000]">Kitchen</h2><button id="kitchen-edit" type="button" class="rounded-lg px-2 py-1 text-xs font-bold text-[#a52b10] hover:bg-[#fff1ed]">Edit setup</button></div>
+          <div class="mt-3 flex flex-wrap gap-1.5">${stationChips(kitchen)}</div>
+          <details class="mt-3"><summary class="cursor-pointer text-sm font-bold text-[#5C0000]">${kitchen.menu.length} menu items</summary><table class="mt-2 w-full text-sm"><tbody>${menuRows(kitchen)}</tbody></table></details>`;
+        document.getElementById('kitchen-edit').addEventListener('click', () => kitchenAction('/api/kitchen/edit'));
+      } else {
+        card.innerHTML = `<p class="text-xs font-bold uppercase tracking-[.16em] text-[#FF3008]">One-time setup</p><h2 class="text-xl font-extrabold text-[#5C0000]">Paste your menu</h2>
+          <p class="mt-1 text-sm text-[#766d69]">The menu you already have, plus a line about your equipment. BonApp estimates each item's station and cook time; you fix anything wrong.</p>
+          <textarea id="kitchen-text" rows="8" class="mt-3 w-full rounded-xl border border-[#ddd5d1] bg-[#faf9f8] p-3 text-sm outline-none focus:border-[#FF3008]" placeholder="Smash Burger $9&#10;Fries $4&#10;...&#10;Kitchen: flat top fits 6 patties, 2 fryers with 2 baskets each"></textarea>
+          <div class="mt-2 flex flex-wrap items-center justify-between gap-2"><button id="kitchen-sample" type="button" class="text-sm font-bold text-[#a52b10] underline decoration-dotted underline-offset-4">Load sample menu</button><button id="kitchen-draft" type="button" class="rounded-xl bg-[#FF3008] px-4 py-2.5 font-extrabold text-white hover:bg-[#e92b07] disabled:opacity-60">Draft kitchen setup</button></div>
+          <div id="kitchen-changes" class="mt-2 space-y-1 text-sm"></div>`;
+        document.getElementById('kitchen-sample').addEventListener('click', () => { document.getElementById('kitchen-text').value = expoSamples.kitchen_text || ''; });
+        document.getElementById('kitchen-draft').addEventListener('click', event => {
+          setBusy(event.currentTarget, true, 'Reading menu…');
+          kitchenAction('/api/kitchen/draft', { text: document.getElementById('kitchen-text').value });
+        });
+      }
+    }
+    async function kitchenAction(url, body, showChanges = false) {
+      try {
+        const data = await postJSON(url, body);
+        applyExpoState(data);
+        if (showChanges) renderChanges(document.getElementById('kitchen-changes'), data.result || []);
+      } catch (error) {
+        const box = document.getElementById('kitchen-changes');
+        if (box) box.innerHTML = `<p class="rounded-lg bg-red-50 px-3 py-1.5 font-semibold text-red-800">${esc(error.message)}</p>`;
+        const draftButton = document.getElementById('kitchen-draft'); if (draftButton) setBusy(draftButton, false);
+      }
+    }
+
+    // Camera
+    function setCameraNote(text) { document.getElementById('camera-note').textContent = text; }
+    async function startCamera(deviceId = null) {
+      if (cameraStream && !deviceId) { stopCamera(); return; }
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraNote('Live camera needs this page on localhost or HTTPS. Use "Take or upload photo" instead; on a phone it opens the camera.');
+        return;
+      }
+      stopCamera();
+      const video = deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } };
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { ...video, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+      } catch (error) {
+        cameraStream = null;
+        setCameraNote(error.name === 'NotAllowedError' ? 'Camera permission was blocked. Allow the camera for this site in your browser settings, then try again.'
+          : error.name === 'NotFoundError' ? 'No camera was found. Use "Take or upload photo" instead.'
+          : `Couldn't start the camera (${error.name}). Use "Take or upload photo" instead.`);
+        return;
+      }
+      const el = document.getElementById('camera-video');
+      el.srcObject = cameraStream; el.classList.remove('hidden');
+      document.getElementById('camera-placeholder').classList.add('hidden');
+      try { await el.play(); } catch (error) { /* autoplay is allowed for muted video */ }
+      document.getElementById('camera-start').textContent = 'Stop camera';
+      document.getElementById('camera-snap').disabled = !expoState?.kitchen;
+      setCameraNote('Hold each ticket or tablet flat and fill the frame, then Snap.');
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      const select = document.getElementById('camera-select');
+      const current = cameraStream.getVideoTracks()[0]?.getSettings().deviceId;
+      select.innerHTML = devices.map((d, i) => `<option value="${esc(d.deviceId)}" ${d.deviceId === current ? 'selected' : ''}>${esc(d.label || `Camera ${i + 1}`)}</option>`).join('');
+      select.classList.toggle('hidden', devices.length < 2);
+    }
+    function stopCamera() {
+      if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+      cameraStream = null;
+      const el = document.getElementById('camera-video');
+      if (!el) return;
+      el.srcObject = null; el.classList.add('hidden');
+      document.getElementById('camera-placeholder').classList.remove('hidden');
+      document.getElementById('camera-start').textContent = 'Start camera';
+      document.getElementById('camera-snap').disabled = true;
+    }
+    function toJpeg(source, width, height) {
+      const scale = Math.min(1, 1600 / Math.max(width, height));   // keep photos small enough to send quickly
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(width * scale); canvas.height = Math.round(height * scale);
+      canvas.getContext('2d').drawImage(source, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.85);
+    }
+    function snapTicket() {
+      const el = document.getElementById('camera-video');
+      if (!cameraStream || !el.videoWidth || !expoState?.kitchen) return;
+      const flash = document.getElementById('camera-flash');
+      flash.style.opacity = '0.8'; setTimeout(() => { flash.style.opacity = '0'; }, 120);
+      submitTicket({ image: toJpeg(el, el.videoWidth, el.videoHeight) });
+    }
+    function photoFromFile(file) {
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { submitTicket({ image: toJpeg(img, img.naturalWidth, img.naturalHeight) }); URL.revokeObjectURL(url); };
+      img.onerror = () => { URL.revokeObjectURL(url); addFeedEntry(null).fail('That photo format can’t be read here. Try a JPEG or PNG.'); };
+      img.src = url;
+    }
+
+    // Each snap becomes a feed entry that updates when the AI has read it
+    function addFeedEntry(imageUrl, label = 'Reading ticket…') {
+      const feed = document.getElementById('capture-feed');
+      const entry = document.createElement('div');
+      entry.className = 'flex items-start gap-3 rounded-xl border border-[#eee9e7] bg-[#fdfcfb] p-2.5';
+      entry.innerHTML = `${imageUrl ? `<img src="${imageUrl}" alt="Captured ticket" class="h-14 w-14 flex-none rounded-lg object-cover">` : '<div class="grid h-14 w-14 flex-none place-items-center rounded-lg bg-[#f6f3f2] text-xl">🧾</div>'}<div class="min-w-0 flex-1 text-sm"><p class="feed-status flex items-center gap-2 font-bold text-[#5C0000]"><span class="h-4 w-4 animate-spin rounded-full border-2 border-[#f4c6b9] border-t-[#FF3008]"></span>${esc(label)}</p></div>`;
+      feed.prepend(entry);
+      while (feed.children.length > 8) feed.lastChild.remove();
+      const body = entry.querySelector('.min-w-0');
+      return {
+        done(result) {
+          const added = result.added.map(o => `<p class="font-bold text-emerald-800">✓ ${esc(o.id)} · ${esc(o.channel)} · pickup ${esc(o.pickup)}</p><p class="text-[#554b47]">${o.items.map(i => `${i.qty}× ${esc(i.name)}`).join(', ')}</p>`).join('');
+          const skipped = result.skipped.length ? `<p class="font-semibold text-amber-700">Already have ${result.skipped.map(esc).join(', ')} (skipped)</p>` : '';
+          const notes = result.assumptions.length ? `<p class="mt-1 text-xs text-[#8d807b]">${result.assumptions.map(esc).join(' · ')}</p>` : '';
+          body.innerHTML = added + skipped + notes || '<p class="font-semibold text-[#766d69]">No new orders found.</p>';
+        },
+        fail(message) { body.innerHTML = `<p class="font-bold text-red-800">Couldn't read that</p><p class="text-red-700">${esc(message)}</p>`; }
+      };
+    }
+    async function submitTicket(payload) {
+      const entry = addFeedEntry(payload.image || null, payload.image ? 'Reading ticket…' : 'Reading pasted tickets…');
+      try {
+        const data = await postJSON('/api/tickets', { now: expoNow(), ...payload });
+        entry.done(data.result);
+        applyExpoState(data);
+      } catch (error) { entry.fail(error.message); }
+    }
+
+    // Orders, fire queue, stations
+    function renderOrders(plan = null) {
+      const list = document.getElementById('orders-list');
+      const orders = expoState?.orders || [];
+      const statusById = Object.fromEntries((plan?.orders || []).map(o => [o.id, o]));
+      if (!orders.length) { list.innerHTML = '<p class="rounded-xl bg-[#faf7f6] p-3 text-sm text-[#766d69]">No orders yet. Snap a ticket to add one.</p>'; return; }
+      list.innerHTML = orders.map(o => {
+        const st = statusById[o.id];
+        const late = st && st.late_by_min > 0;
+        const badge = st ? `<span class="rounded-full px-2 py-0.5 text-xs font-extrabold ${late ? 'bg-red-100 text-red-800' : 'bg-emerald-50 text-emerald-800'}">${late ? `Late ${st.late_by_min}m` : `Ready ${esc(st.ready)}`}</span>` : '';
+        return `<div class="rounded-xl border ${late ? 'border-red-200 bg-red-50/40' : 'border-[#eee9e7]'} p-2.5"><div class="flex items-center justify-between gap-2"><p class="text-sm font-extrabold text-[#5C0000]">${esc(o.id)} <span class="font-semibold text-[#766d69]">· ${esc(o.channel)} · pickup ${esc(o.pickup)}</span></p><div class="flex items-center gap-1">${badge}<button data-done="${esc(o.id)}" class="rounded-lg px-2 py-1 text-xs font-bold text-[#276642] hover:bg-emerald-50" title="Bagged and handed off">Done</button></div></div><p class="mt-1 text-xs text-[#554b47]">${o.items.map(i => `${i.qty}× ${esc(i.name)}`).join(', ')}</p>${late ? `<p class="mt-1 text-xs font-bold text-red-800">${esc(st.status)}</p>` : ''}</div>`;
+      }).join('');
+      list.querySelectorAll('[data-done]').forEach(button => button.addEventListener('click', async () => {
+        try { applyExpoState(await postJSON(`/api/orders/${encodeURIComponent(button.dataset.done)}/done`)); } catch (error) { showToast(error.message); }
+      }));
+    }
+    const toMinutes = hhmm => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
+    async function refreshPlan() {
+      if (!expoVisible) return;
+      const now = expoNow();
+      const queue = document.getElementById('fire-queue');
+      const stationsBox = document.getElementById('station-load');
+      if (!expoState?.kitchen || !expoState.orders.length) {
+        queue.innerHTML = '<p class="rounded-xl bg-[#faf7f6] p-4 text-sm text-[#766d69]">The fire queue appears here once tickets come in: what to drop, when, and for which order.</p>';
+        stationsBox.innerHTML = expoState?.kitchen ? Object.entries(expoState.kitchen.stations).map(([s, n]) => stationBar(s, 0, n, 'open')).join('') : '<p class="text-sm text-[#766d69]">Set up your kitchen first.</p>';
+        renderOrders(null); document.getElementById('fire-updated').textContent = ''; return;
+      }
+      try {
+        const response = await fetch(`/api/expo/plan?now=${encodeURIComponent(now)}`); const data = await response.json();
+        const plan = data.plan;
+        if (!plan) { queue.innerHTML = '<p class="text-sm text-red-800">Could not build a plan for these orders.</p>'; return; }
+        const nowMin = toMinutes(now);
+        queue.innerHTML = plan.fire_queue.map(f => {
+          const wait = toMinutes(f.fire_at) - nowMin;
+          const tone = wait <= 0 ? 'border-[#FF3008] bg-[#fff1ed]' : wait <= 2 ? 'border-amber-300 bg-amber-50' : 'border-[#eee9e7] bg-white';
+          const when = wait <= 0 ? '<span class="animate-pulse rounded-md bg-[#FF3008] px-2 py-0.5 text-xs font-black text-white">FIRE NOW</span>' : `<span class="text-xs font-bold text-[#766d69]">in ${wait} min</span>`;
+          return `<div class="flex items-center gap-3 rounded-xl border ${tone} px-3 py-2.5"><div class="w-14 flex-none text-lg font-black text-[#5C0000]">${esc(f.fire_at)}</div><div class="min-w-0 flex-1"><p class="font-extrabold text-[#24201f]">${f.qty}× ${esc(f.item)} <span class="task-pill ml-1 rounded-full px-2 py-0.5 text-xs font-bold" style="${taskStyle(f.station)}">${esc(f.station)}</span></p><p class="text-xs text-[#766d69]">${esc(f.order)} · ${esc(f.channel)} · order ready ${esc(f.order_ready)}</p></div>${when}</div>`;
+        }).join('');
+        stationsBox.innerHTML = Object.entries(plan.stations).map(([s, b]) => stationBar(s, b.in_use_now, b.capacity, b.busy_until)).join('');
+        renderOrders(plan);
+        document.getElementById('fire-updated').textContent = `Planned for ${now}`;
+      } catch (error) { queue.innerHTML = '<p class="text-sm text-red-800">Could not reach the planner.</p>'; }
+    }
+    function stationBar(name, used, capacity, busyUntil) {
+      const pct = Math.min(100, Math.round((used / capacity) * 100));
+      return `<div><div class="flex justify-between text-sm font-bold text-[#5C0000]"><span>${esc(name)}</span><span class="text-[#766d69]">${used}/${capacity} spots${busyUntil && busyUntil !== 'open' ? ` · booked to ${esc(busyUntil)}` : ''}</span></div><div class="progress-track mt-1"><div class="progress-fill ${pct >= 90 ? 'over90' : ''}" style="width:${pct}%"></div></div></div>`;
+    }
+    async function correctOrders(message) {
+      if (!message.trim()) return;
+      try {
+        const data = await postJSON('/api/orders/correct', { message });
+        renderChanges(document.getElementById('orders-changes'), data.result || []);
+        document.getElementById('orders-correct-input').value = '';
+        applyExpoState(data);
+      } catch (error) { document.getElementById('orders-changes').innerHTML = `<p class="rounded-lg bg-red-50 px-3 py-1.5 font-semibold text-red-800">${esc(error.message)}</p>`; }
+    }
+
     async function init() {
       refreshAiMode();
+      setDataMode('notes');
       showDataInView();
     }
     document.getElementById('update-form').addEventListener('submit', event => { event.preventDefault(); sendUpdate(document.getElementById('update-input').value); });
@@ -553,6 +988,35 @@
     document.getElementById('drawer-close').addEventListener('click', () => setDrawer(false));
     document.getElementById('drawer-backdrop').addEventListener('click', () => setDrawer(false));
     document.addEventListener('keydown', event => { if (event.key === 'Escape') setDrawer(false); });
+    document.getElementById('mode-notes').addEventListener('click', () => setDataMode('notes'));
+    document.getElementById('mode-upload').addEventListener('click', () => setDataMode('upload'));
+    document.getElementById('notes-load-sample').addEventListener('click', loadSampleNotes);
+    document.getElementById('notes-read').addEventListener('click', readNotes);
+    document.getElementById('notes-correct-form').addEventListener('submit', event => { event.preventDefault(); correctNotes(document.getElementById('notes-correct-input').value); });
+    document.getElementById('notes-undo').addEventListener('click', undoNotes);
+    document.getElementById('notes-build').addEventListener('click', buildFromNotes);
+    document.getElementById('show-expo').addEventListener('click', showExpoView);
+    document.getElementById('camera-start').addEventListener('click', () => startCamera());
+    document.getElementById('camera-select').addEventListener('change', event => startCamera(event.target.value));
+    document.getElementById('camera-snap').addEventListener('click', snapTicket);
+    document.getElementById('photo-input').addEventListener('change', event => { photoFromFile(event.target.files[0]); event.target.value = ''; });
+    document.getElementById('ticket-text-add').addEventListener('click', () => { const text = document.getElementById('ticket-text').value; if (text.trim()) submitTicket({ text }); });
+    document.getElementById('ticket-sample').addEventListener('click', () => {
+      document.getElementById('ticket-text').value = expoSamples.tickets_text || '';
+      document.getElementById('clock-live').checked = false; document.getElementById('expo-clock').disabled = false;
+      document.getElementById('expo-clock').value = '18:05';
+      showToast('Clock set to 18:05 to match the sample tickets');
+    });
+    document.getElementById('clock-live').addEventListener('change', event => { document.getElementById('expo-clock').disabled = event.target.checked; refreshPlan(); });
+    document.getElementById('expo-clock').addEventListener('change', refreshPlan);
+    document.getElementById('expo-clock').disabled = true;
+    document.getElementById('orders-correct-form').addEventListener('submit', event => { event.preventDefault(); correctOrders(document.getElementById('orders-correct-input').value); });
+    document.getElementById('orders-undo').addEventListener('click', async () => { try { applyExpoState(await postJSON('/api/orders/undo')); } catch (error) { showToast(error.message); } });
+    document.getElementById('orders-clear').addEventListener('click', async () => { if (confirm('Clear all orders?')) { try { applyExpoState(await postJSON('/api/orders/clear')); } catch (error) { showToast(error.message); } } });
+    document.addEventListener('keydown', event => {
+      if (!expoVisible || event.code !== 'Space' || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(document.activeElement?.tagName)) return;
+      event.preventDefault(); snapTicket();
+    });
     init();
   </script>
 </body>

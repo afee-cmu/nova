@@ -42,16 +42,19 @@ Output ONLY a JSON object, no prose:
 }
 Rules:
 - Stations are lowercase single words: "grill" (flat top, griddle, broiler), "fryer", "cold" (salads, shakes,
-  desserts, cold prep), "oven" (pizza, baked). Only include stations this menu needs.
+  desserts, cold prep), "oven" (pizza, baked), "drinks" (fountain sodas like Coke and Sprite, bottled drinks, coffee, tea).
+  Only include stations this menu needs.
 - cook_min = how long ONE portion occupies its station once started, realistic for a busy casual restaurant
   (e.g. smash burger ~6, fries ~4, 10 wings ~12, salad ~3).
 - Capacity is measured in spots. Use the equipment note: a fryer basket is about 1 spot; a flat top's spots are
   how many standard items fit. If something isn't stated, assume grill 6, fryer 4, cold 1 (per person),
-  oven 4, and say so.
+  oven 4, drinks 4, and say so.
 - "space" = how many spots ONE portion takes. Standard items take 1. Bigger items take more: if the grill fits
   6 single burgers but only 3 doubles, a double takes 2. Use 1 unless the menu or note makes a bigger item clear.
-- Leave out items with no kitchen prep (fountain drinks, bottled drinks) and combos/meals (orders are split
-  into their parts later). List what you left out in "assumptions".
+- Include every drink. Fountain sodas, bottled drinks, coffee and tea go on "drinks" with cook_min 0.5
+  (a quick pour or grab). Milkshakes, smoothies and other blended drinks go on "cold" with real prep time.
+  If the menu lists one soda item with flavors (e.g. "Fountain Soda: Coke, Sprite"), keep it as one item.
+- Leave out combos/meals (orders are split into their parts later). List what you left out in "assumptions".
 """
 
 CORRECTION_PROMPT = """You update a kitchen-timing setup JSON based on a manager's correction.
@@ -87,7 +90,9 @@ Rules:
 {MENU_TEXT}
 - Combo parts ADD to items listed separately on the same ticket: a "#2 Combo" (Chicken Sandwich + Fries) plus a
   separate "Fries" line = 2x Fries. Count every portion; never merge them away.
-- Drop items not in the valid list (drinks, sauces, utensils) and note them in "assumptions".
+- Drinks count as items: map brands and flavors to the matching menu item (e.g. "Coke" or "Sprite" ->
+  "Fountain Soda" if that is the menu item). Combo drinks are added like any other combo part.
+- Drop only things that are not on the valid list at all (sauces, utensils, napkins) and note them in "assumptions".
 - Ignore modifiers ("no pickles", "spicy", "BBQ") for timing.
 - Times are 24-hour HH:MM; dinner-time tickets like "6:20" mean 18:20. "Dasher arriving", "courier ETA",
   "pickup by" give the pickup time. "In about 25 min" means placed time + 25. Dine-in or walk-in with no time = ASAP.

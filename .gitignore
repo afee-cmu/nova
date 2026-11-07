@@ -5,3 +5,4 @@ __pycache__/
 *.py[cod]
 bonapp-upload-*.xlsx
 .gitignore.local-backup
+kitchen.json
