@@ -1,0 +1,57 @@
+{
+  "stations": {
+    "grill": 6,
+    "fryer": 4,
+    "cold": 1
+  },
+  "menu": {
+    "Smash Burger": {
+      "station": "grill",
+      "cook_min": 6,
+      "space": 1
+    },
+    "Double Smash": {
+      "station": "grill",
+      "cook_min": 6,
+      "space": 2
+    },
+    "Chicken Sandwich": {
+      "station": "fryer",
+      "cook_min": 8,
+      "space": 1
+    },
+    "Fries": {
+      "station": "fryer",
+      "cook_min": 4,
+      "space": 1
+    },
+    "Onion Rings": {
+      "station": "fryer",
+      "cook_min": 5,
+      "space": 1
+    },
+    "Wings (10pc)": {
+      "station": "fryer",
+      "cook_min": 12,
+      "space": 1
+    },
+    "Caesar Salad": {
+      "station": "cold",
+      "cook_min": 3,
+      "space": 1
+    },
+    "Milkshake": {
+      "station": "cold",
+      "cook_min": 3,
+      "space": 1
+    }
+  },
+  "assumptions": [
+    "Fountain Soda and Bottled Water are left out as they require no kitchen prep.",
+    "Combos are left out as they are split into individual items.",
+    "The flat top fits about 6 patties, so a Smash Burger takes 1 spot and a Double Smash takes 2 spots.",
+    "One person handles salads and shakes, so cold station capacity is assumed to be 1.",
+    "Correction: Smash Burger takes 1 spot.",
+    "Correction: Double Smash takes 2 spots."
+  ]
+}
